@@ -54,11 +54,49 @@ test('suggestTracked does not mistake other Vietnamese words for the keywords', 
 });
 
 test('suggestTracked: RE counts only as an uppercase whole word, pin only as a whole word', () => {
-  for (const name of ['Real Estate', 'Re: bàn việc', 'Re-invest club', 'VREN - LAOS', 'CARE Vietnam', 'Spin class', 'Pinterest VN']) {
+  for (const name of ['Real Estate', 'Re: bàn việc', 'Re-invest club', 'GREEN CLUB', 'CARE Vietnam', 'Spin class', 'Pinterest VN']) {
     assert.equal(suggest(name), false, name);
   }
   assert.equal(suggest('Nhóm RE-Developers'), true);
   assert.equal(suggest('PIN mặt trời'), true);
+});
+
+test('suggestTracked also knows DPPA, JETP, NetZero, wind, VREN, phát thải, hydrogen and LNG', () => {
+  const names = [
+    'Wind Buddies', 'Điện gió và wind farm',
+    'SaintGobain DPPA', 'CTĐT "Cơ chế DPPA và TTĐ tại VN" HCM 26-27/8',
+    'Chương trình đào tạo JETP tại TP. HCM', 'JETP Vietnam',
+    '2025. De an NetZero Khu CNC', 'Net Zero 2050', 'Net-Zero Club',
+    'VREN - LAOS', 'VREN - CĐ Năng lượng tái tạo VN 2026',
+    'Allotrope-BIDV_Phát thải tài chính', 'phat thai carbon', 'Kiểm kê phát thải',
+    'Hydrogen Vietnam', 'LNG Vietnam', 'Dự án LNG Sơn Mỹ',
+  ];
+  for (const name of names) assert.equal(suggest(name), true, name);
+});
+
+test('suggestTracked: the short new tokens are whole words, so they do not fire inside other words', () => {
+  for (const name of ['Windows 11 tips', 'Windsor Club', 'Vrenco', 'Calling all friends', 'Building group', 'Ling Ling']) {
+    assert.equal(suggest(name), false, name);
+  }
+});
+
+test('suggestTracked: exclusions still win over the new keywords', () => {
+  for (const name of ['Wind Adventure Club', 'Du lịch NetZero', 'Săn sale hydrogen', 'DPPA K5', 'VREN Khóa 2020']) {
+    assert.equal(suggest(name), false, name);
+  }
+});
+
+test('suggestTracked: the company name Allotrope is not a keyword', () => {
+  for (const name of ['Allotrope Vietnam', 'TCB <> Allotrope', 'UDICO-ALLOTROPE', 'SLV- Allotrope', 'Jinquan - Stride - Allotrope']) {
+    assert.equal(suggest(name), false, name);
+  }
+  assert.equal(suggest('Jinquan - SmartSolar - Allotrope'), true, 'true because of "solar", not "Allotrope"');
+  assert.equal(suggest('Jinquan - SmartSolar'), true);
+});
+
+test('suggestTracked: "RE Sale Managers Group" has the RE keyword but the "sale" exclusion wins', () => {
+  assert.equal(suggest('RE Sale Managers Group'), false);
+  assert.equal(suggest('RE Sales Managers Group'), true, 'without the exclusion ("sales" is not "sale") RE counts');
 });
 
 test('suggestTracked turns off the clearly unrelated groups (brief cases)', () => {

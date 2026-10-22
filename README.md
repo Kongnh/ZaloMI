@@ -22,7 +22,7 @@ node zmi.mjs groups              # in danh sách nhóm từ config/groups.json, 
 node zmi.mjs groups --refresh    # đọc lại danh sách nhóm từ Zalo (chỉ đọc), cập nhật database và config/groups.json
 ```
 
-`groups` in bảng gồm tên nhóm, số thành viên, theo dõi (`✓`/`–`), ghi chú, và dòng "Đang theo dõi X/Y nhóm". `config/groups.json` là nơi quyết định nhóm nào được theo dõi (`tracked`): lần đầu zmi đề xuất theo từ khóa trong tên nhóm (năng lượng, solar, điện, gió, BESS, energy, RE, ESG, carbon, NLTT, tái tạo, pin; loại trừ mua sắm, du lịch, lớp học cũ), các lần sau giữ nguyên `tracked` và `note` bạn đã sửa tay, nhóm mới được thêm với ghi chú "đề xuất tự động", nhóm không còn trên Zalo được giữ lại với `"missing": true`. File này không được commit (nằm trong `.gitignore`).
+`groups` in bảng gồm tên nhóm, số thành viên, theo dõi (`✓`/`–`), ghi chú, và dòng "Đang theo dõi X/Y nhóm". `config/groups.json` là nơi quyết định nhóm nào được theo dõi (`tracked`): lần đầu zmi đề xuất theo từ khóa trong tên nhóm (năng lượng, solar, điện, gió, BESS, energy, RE, ESG, carbon, NLTT, tái tạo, pin, DPPA, JETP, NetZero, wind, VREN, phát thải, hydrogen, LNG; loại trừ mua sắm, du lịch, lớp học cũ), các lần sau giữ nguyên `tracked` và `note` bạn đã sửa tay, nhóm mới được thêm với ghi chú "đề xuất tự động", nhóm không còn trên Zalo được giữ lại với `"missing": true`. File này không được commit (nằm trong `.gitignore`).
 
 ## Cấu trúc
 
