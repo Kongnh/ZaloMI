@@ -107,6 +107,19 @@ Mỗi ảnh được xử lý như sau:
 
 **Cache ảnh trên máy.** Tên file trong `picture\<convId bỏ g>_group\` có dạng `z<msgId>_<mã băm>.jxl|.jpg`, trong `resource\<convId>\picture\` có dạng `<cliMsgId>_<fromUid>_<convId>_<mã băm>.jxl|.jpg` (cùng mã băm cho cùng một ảnh), nên ghép được với tin theo `msgId`, hoặc theo `cliMsgId` + người gửi. Nhóm thử có 337/339 ảnh trong cache; toàn bộ 28 nhóm có 2.435/10.010. Ảnh trong cache có kích thước như ảnh Zalo lưu (9/11 ảnh thử khớp `width`/`height`; 2 ảnh 4032×3024 được Zalo thu nhỏ còn 2568×1926).
 
+## Kiểm thử mẫu ảnh (bước 5 của Task 7)
+
+54 ảnh thật của nhóm thử `g8318398124727869839` (chọn ngẫu nhiên trong 337 ảnh có trên máy), xem từng ảnh và gán nhãn tay: 42 ảnh có chữ (slide, biểu đồ, văn bản, bảng giá, ảnh chụp màn hình, thiệp có chữ, 6 ảnh poster, thư mời hoặc băng rôn sự kiện), 12 ảnh không có chữ (ảnh flycam, ảnh người, ảnh sản phẩm, ảnh bản đồ vệ tinh). So với quyết định của hệ thống (cùng OCR của Zalo, cùng cách ghép dòng, cùng ngưỡng; chạy trong bước thử nghiệm vì lần chạy thật bị dừng trước khi tới các ảnh cũ này):
+
+| | Nhãn: có chữ | Nhãn: không có chữ |
+| --- | --- | --- |
+| Hệ thống: có chữ | 42 | 1 (ảnh người trước bảng trưng bày có chữ đọc được) |
+| Hệ thống: không có chữ | 0 | 11 |
+
+Độ chính xác 42/43 = 97,7 %, độ phủ 42/42 = 100 %, **không bỏ sót poster sự kiện nào** (6/6). Điểm `text_score` của ảnh có chữ thấp nhất là 9 (sơ đồ "polysilicon → wafer → solar cell → solar module"), của ảnh không có chữ (trừ ca biên ở trên) cao nhất là 2 ("gogoro network", "Google Maps"); ngưỡng 6 nằm giữa khoảng trống này. Mọi ngưỡng từ 3 đến 9 cho cùng kết quả, ngưỡng 10 làm sót sơ đồ trên.
+
+Trên 300 ảnh mới nhất (chạy thật), ảnh 1 đến 5 từ là ảnh sản phẩm, ảnh người có biển hiệu nhỏ: đúng là `no_text`. Khoảng 6 đến 9 từ phần lớn là ảnh sản phẩm có nhãn bao bì (một nhóm bán hàng đăng lại nhiều lần) và được lưu: chấp nhận vài ảnh thừa để không bỏ sót ảnh có ít chữ.
+
 ## Thử nghiệm tải file (bước 0 của Task 6)
 
 Thử `GET` thật lên `href` của các file đã lưu trong database, bằng hai cách: (2) Node `fetch` và (3) `fetch` chạy trong cửa sổ Zalo qua CDP (cùng phiên đăng nhập, `credentials: 'include'`; chỉ là một `GET` mạng, không gọi hàm nào của Zalo, không đụng kho dữ liệu của Zalo). Không gọi `$zdownload` (quy tắc R1).
