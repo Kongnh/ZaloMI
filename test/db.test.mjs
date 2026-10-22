@@ -423,3 +423,35 @@ test('maxTs and search reject a numeric conversation id instead of silently matc
   assert.deepEqual(db.search('solar', { convIds: ['123'] }).map(r => r.msg_id), ['m1']);
   db.close();
 });
+
+test('images.error exists, and a database created before the column existed gets it on open without losing rows', async () => {
+  const { db } = memDb();
+  db.upsertImage({ msg_id: 'i1', conv_id: 'g1', ts: 1, status: 'unavailable', error: 'HTTP 404 (link đã hết hạn)' });
+  assert.equal(db.raw.prepare('SELECT error FROM images WHERE msg_id = ?').get('i1').error, 'HTTP 404 (link đã hết hạn)');
+  db.upsertImage({ msg_id: 'i1', status: 'stored', stored_path: 'data/images/g1/i1.jpg' });
+  assert.equal(db.raw.prepare('SELECT error FROM images WHERE msg_id = ?').get('i1').error, 'HTTP 404 (link đã hết hạn)', 'an upsert that omits error keeps it');
+  db.close();
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zmi-db-'));
+  const file = path.join(dir, 'old.db');
+  try {
+    const { DatabaseSync } = await import('node:sqlite');
+    const old = new DatabaseSync(file);
+    old.exec(`CREATE TABLE images (msg_id TEXT PRIMARY KEY, conv_id TEXT, ts INTEGER, sender_name TEXT, caption TEXT, width INTEGER, height INTEGER,
+      remote_url TEXT, cache_path TEXT, stored_path TEXT, shape_class TEXT, text_score REAL, ocr_text TEXT, has_text INTEGER, scanned_at INTEGER, status TEXT)`);
+    old.exec("INSERT INTO images (msg_id, conv_id, ts, width) VALUES ('old1', 'g1', 5, 640)");
+    old.close();
+
+    const reopened = openDb(file);
+    const cols = reopened.raw.prepare('PRAGMA table_info(images)').all().map(c => c.name);
+    assert.ok(cols.includes('error'), 'column added');
+    assert.equal(reopened.raw.prepare("SELECT width FROM images WHERE msg_id = 'old1'").get().width, 640, 'existing row kept');
+    reopened.upsertImage({ msg_id: 'old1', status: 'failed', error: 'x' });
+    reopened.close();
+    const twice = openDb(file); // opening again must not try to add the column a second time
+    assert.equal(twice.raw.prepare("SELECT error FROM images WHERE msg_id = 'old1'").get().error, 'x');
+    twice.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

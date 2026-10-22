@@ -2,7 +2,7 @@
 
 Công cụ dòng lệnh `zmi` (Node 24) đọc tin nhắn nhóm Zalo từ ứng dụng Zalo PC đang chạy, qua Chrome DevTools Protocol, để đưa vào một database SQLite riêng phục vụ báo cáo market intelligence theo yêu cầu. Thiết kế đầy đủ: `Thiết kế hệ thống Zalo MI.md`. Kết quả thử nghiệm đọc dữ liệu: `Kết quả thử nghiệm đọc dữ liệu Zalo PC.md`.
 
-Hiện có: kết nối CDP, cầu nối chỉ đọc, các lệnh `doctor`, `groups`, `sync` (lấy tin của các nhóm theo dõi vào database) và `files` (lưu file đính kèm vào `data/files/`). Chưa có quét chữ trong ảnh, `export` và `search`.
+Hiện có: kết nối CDP, cầu nối chỉ đọc, các lệnh `doctor`, `groups`, `sync` (lấy tin của các nhóm theo dõi vào database), `files` (lưu file đính kèm vào `data/files/`) và `images` (quét chữ trong ảnh, lưu ảnh có chữ vào `data/images/`). Chưa có `export` và `search`.
 
 ## Yêu cầu
 
@@ -64,6 +64,49 @@ node zmi.mjs files --limit 50       # chỉ 50 file (mới nhất trước)
 
 **Link file của Zalo chỉ sống vài tuần (thường 1-3 tuần)** (xem phần thử nghiệm bên dưới). Vì vậy file chỉ được lưu đầy đủ nếu `zmi sync` chạy đều đặn (ít nhất mỗi tuần một lần, tốt nhất mỗi ngày): file cũ hơn thế chỉ còn nếu đã có sẵn trên máy (đã tải bằng Zalo, hoặc do chính Cong gửi từ máy mình).
 
+```
+node zmi.mjs images                 # quét các ảnh chưa quét (và ảnh lỗi lần trước)
+node zmi.mjs images --limit 300     # chỉ 300 ảnh, theo thứ tự ưu tiên
+node zmi.mjs images --rescan        # quét lại mọi ảnh, kể cả ảnh đã quét
+```
+
+`images` tìm chữ trong mọi ảnh của các nhóm theo dõi (không chỉ ảnh chụp màn hình), giữ lại ảnh có chữ (ảnh chụp màn hình, poster sự kiện, ảnh chụp văn bản hoặc bảng giá, infographic, slide) để Claude đọc sau, và bỏ ảnh không có chữ (ảnh người, phong cảnh, sản phẩm không có chữ). **Cần Zalo đang mở ở chế độ thu thập**, vì bộ đọc chữ (OCR) và bộ giải mã ảnh JXL là của chính Zalo; Zalo đóng thì lệnh in hướng dẫn mở "Zalo (MI)", thoát mã 1 và không ghi gì. Chạy sau `sync`, **ít nhất mỗi tuần một lần**: link ảnh của Zalo chỉ sống khoảng 2 tuần (xem phần thử nghiệm bên dưới).
+
+Mỗi ảnh được xử lý như sau:
+
+1. **Lấy ảnh**: trước hết từ cache ảnh của Zalo trên máy (chỉ đọc): `picture\<convId bỏ chữ g>_group\z<msgId>_<mã>.<đuôi>`, `resource\<convId>\picture\<cliMsgId>_<fromUid>_<convId>_<mã>.<đuôi>` trong `%APPDATA%\ZaloData\media\<uid>\ZaloDownloads\`, và `localPath` của tin (đổi gốc cũ như với file). Có bản `.jpg`/`.png` thì dùng luôn, chỉ có `.jxl` thì nhờ bộ giải mã JXL của Zalo đổi sang JPEG. Không có trên máy thì tải theo link (`hdUrl`): với link JXL của Zalo, xin bản JPEG ở cùng đường dẫn (`/jxl/…/x.jxl` thành `/jpg/…/x.jpg`), không được mới tải link gốc. Chỉ tải `http(s)` từ máy chủ công cộng (từ chối localhost và địa chỉ nội bộ, kiểm tra lại ở mỗi lần chuyển hướng), tối đa 20 MB, chờ tối đa 30 giây.
+2. **Đọc chữ** bằng OCR của Zalo trên một file tạm của zmi (`data/images/.tmp/`), không bao giờ trên file trong thư mục Zalo.
+3. **Quyết định**: ảnh "có chữ" khi OCR đọc được từ 6 từ trở lên (từ = cụm có ít nhất 2 chữ cái hoặc chữ số, nên con số trong bảng giá cũng tính). Một logo, biển hiệu hay nhãn bản đồ (1 đến 5 từ) không đủ. Ngưỡng này được chọn trên mẫu ảnh thật (bên dưới).
+4. **Lưu**: chỉ ảnh có chữ được ghi vào `data/images/<convId>/<msgId>.jpg` (ảnh gốc PNG thì giữ `.png`), qua file tạm rồi đổi tên. Ảnh không có chữ chỉ giữ dòng trong database.
+
+| `status` | Nghĩa |
+| --- | --- |
+| `stored` | Có chữ, đã lưu ở `images.stored_path` (đường dẫn tính từ thư mục gốc repo, dấu `/`) |
+| `no_text` | Đã đọc, không đủ chữ; không lưu file |
+| `unavailable` | Không có trên máy và link đã hết hạn hoặc không tải được (lý do ở `images.error`, ví dụ `HTTP 404 (link đã hết hạn)`) |
+| `failed` | Lỗi khi giải mã hoặc đọc chữ, hay mạng chập chờn với ảnh còn mới (lý do ở `error`); lần chạy sau tự thử lại |
+
+- Mỗi ảnh ghi `shape_class`, `status`, `has_text` (1/0), `text_score` (số từ), `ocr_text` (các dòng chữ OCR đọc được, cả khi không đủ để lưu ảnh), `stored_path`, `scanned_at`, `error`. `ocr_text` được đưa vào tìm kiếm toàn văn cùng tin nhắn, không phân biệt dấu.
+- `shape_class` (`phone_screenshot`: ảnh dọc tỉ lệ ít nhất 1,9; `desktop_screenshot`: ảnh ngang gần 16:9 hoặc 16:10, rộng từ 1280; còn lại `photo`) được tính cho mọi ảnh ngay đầu lần chạy, từ kích thước đã lưu.
+- **Thứ tự**: ảnh còn link (16 ngày gần nhất) trước, trong đó ảnh có dáng ảnh chụp màn hình trước, rồi đến ảnh cũ nhất trước (ảnh sắp hết hạn link được quét trước); sau đó ảnh cũ hơn có trên máy; cuối cùng là phần còn lại (phần lớn sẽ là `unavailable`).
+- Chạy lại không làm lại gì: chỉ quét ảnh chưa có `scanned_at` và ảnh `failed`. `--rescan` quét lại tất cả (ảnh đã lưu được đọc lại từ chính file đã lưu); `--rescan` không xóa file đã lưu.
+- Đồng thời 3 ảnh. Bảo vệ ổ đĩa như `files`: ổ chứa `data/` còn dưới 5 GB thì dừng, ảnh còn lại giữ nguyên, thoát mã 1. Mất kết nối với Zalo giữa chừng, hoặc 10 ảnh lỗi liên tiếp, thì dừng và báo; chạy lại là tiếp tục.
+- In tiến độ mỗi 25 ảnh, rồi `Đã quét X ảnh: Y có chữ (đã lưu), Z không có chữ, W không còn tải được, V lỗi`, thời gian và tốc độ (ảnh/giây), các lý do lỗi phổ biến nhất, và dòng trạng thái của toàn bộ bảng ảnh.
+
+## Thử nghiệm ảnh (bước 0 của Task 7)
+
+**Đổi JXL sang JPEG.** Thử theo thứ tự của spec:
+
+1. *Xin JPEG từ máy chủ ảnh của Zalo*: gửi `Accept: image/jpeg,image/png`, bỏ `?jxlstatus=1` hay đổi `jxlstatus=0` đều vẫn nhận `image/jxl`. Nhưng đổi đường dẫn `/jxl/…/x.jxl` thành `/jpg/…/x.jpg` thì máy chủ trả **JPEG thật** (`ffd8ff`, `image/jpg`), đúng kích thước Zalo lưu (11/12 ảnh thử khớp `width`/`height`; ảnh 4284×5712 nhận bản 1920×2560, Zalo giới hạn cạnh dài 2560). Dùng cách này cho mọi ảnh tải theo link: không cần giải mã.
+2. *Bộ giải mã của Zalo* (`$zFeatures.libjxl.decodeToJpeg`, bản gói sẵn của `$znode.nativelibs.zjxl`): chạy được qua CDP, đưa byte vào, nhận JPEG ra, khoảng 130 ms cho ảnh 1254×1254 (khoảng 200 ms tính cả truyền base64). Hàm này chỉ tính toán: không đọc, không ghi gì của Zalo. Dùng cho ảnh trong cache máy chỉ có bản `.jxl`. Cần thiết: cache máy có ảnh của 2.435/10.010 dòng (2.324 ảnh đã hết hạn link), trong đó chỉ khoảng 630 có sẵn bản `.jpg`.
+3. *Gói WASM npm*: không cần, không cài gói npm nào.
+
+**OCR tiếng Việt.** Thử `$znode.nativelibs.zocr` trước, qua hàm gói sẵn của Zalo `$zFeatures.ocr.recognize(đường dẫn)` (động cơ của tính năng "sao chép chữ trong ảnh" của Zalo PC, chạy trong tiến trình riêng `zocr-host`). Trên 54 ảnh thật của nhóm thử nó đọc **tiếng Việt có dấu rất tốt** (ví dụ cả poster "BIẾN TẦN SOLIS 100KW … GIẢI PHÁP TỐI ƯU CHO NĂNG LƯỢNG MẶT TRỜI MÁI XƯỞNG", văn bản, bảng giá, biểu đồ), trả về từng dòng kèm điểm tin cậy. Tốc độ: khoảng 0,8 giây/ảnh khi chạy một luồng (lần đầu thêm khoảng 2 giây khởi động), 0,7 giây/ảnh với 3 luồng; chạy thật trên 300 ảnh mới nhất (gồm tải ảnh): **2,2 ảnh/giây**. Không cài thêm gì. Vì cách đầu tiên đạt cả ba tiêu chí của spec (đọc được tiếng Việt có dấu, đủ nhanh cho vài nghìn ảnh, không cài thêm), **không thử** `Windows.Media.Ocr` (máy này chỉ có gói tiếng Anh, không đọc dấu) và Tesseract (phải tải dữ liệu ngôn ngữ, chậm hơn). Đánh đổi: `zmi images` cần Zalo mở, như `sync`.
+
+**Link ảnh hết hạn sau khoảng 15 ngày** (22 link thử theo tuổi): 200 ở 3 đến 15,0 ngày; 404 từ 15,2 ngày trở đi (cả bản JPEG lẫn bản JXL); máy chủ cũ `f57/f61-zpg-r.zdn.vn` (khoảng 400 ngày) trả 502 hoặc không còn tên miền. Vì vậy ảnh không có trong cache máy phải được quét trong vòng 2 tuần sau khi gửi.
+
+**Cache ảnh trên máy.** Tên file trong `picture\<convId bỏ g>_group\` có dạng `z<msgId>_<mã băm>.jxl|.jpg`, trong `resource\<convId>\picture\` có dạng `<cliMsgId>_<fromUid>_<convId>_<mã băm>.jxl|.jpg` (cùng mã băm cho cùng một ảnh), nên ghép được với tin theo `msgId`, hoặc theo `cliMsgId` + người gửi. Nhóm thử có 337/339 ảnh trong cache; toàn bộ 28 nhóm có 2.435/10.010. Ảnh trong cache có kích thước như ảnh Zalo lưu (9/11 ảnh thử khớp `width`/`height`; 2 ảnh 4032×3024 được Zalo thu nhỏ còn 2568×1926).
+
 ## Thử nghiệm tải file (bước 0 của Task 6)
 
 Thử `GET` thật lên `href` của các file đã lưu trong database, bằng hai cách: (2) Node `fetch` và (3) `fetch` chạy trong cửa sổ Zalo qua CDP (cùng phiên đăng nhập, `credentials: 'include'`; chỉ là một `GET` mạng, không gọi hàm nào của Zalo, không đụng kho dữ liệu của Zalo). Không gọi `$zdownload` (quy tắc R1).
@@ -91,17 +134,20 @@ Nhóm `☀️ Future Energy Vietnam 🇻🇳`, giai đoạn 22/09 đến 05/10/2
 
 | File | Vai trò |
 | --- | --- |
-| `zmi.mjs` | Điểm vào CLI, lệnh `doctor`, `groups`, `sync` và `files` |
+| `zmi.mjs` | Điểm vào CLI, lệnh `doctor`, `groups`, `sync`, `files` và `images` |
+| `lib/images.mjs` | `shapeClass`, `textScore`/`hasText` (quyết định có chữ), `jpegVariantUrl`, `checkRemoteUrl`/`fetchImage` (tải an toàn), `scanImages` (phần tồn đọng: cache máy, link, giải mã, OCR, lưu; đồng thời 3 ảnh, bảo vệ ổ đĩa), in kết quả |
 | `lib/files.mjs` | `resolveFile` (một file: chép từ máy, tải theo link, kiểm tra), `resolveFiles` (phần tồn đọng, đồng thời 3 file, bảo vệ ổ đĩa), `remapLocalPath`, đặt tên file, in kết quả |
 | `lib/sync.mjs` | `syncGroup` (một nhóm: đọc Zalo, chuẩn hóa, ghi trong một transaction), `syncAll` (mọi nhóm, ghi `sync_runs`), chọn nhóm và in kết quả |
 | `lib/groups.mjs` | `suggestTracked`, gộp danh sách nhóm vào `config/groups.json`, in bảng nhóm |
 | `lib/cdp.mjs` | `connect(title = 'Zalo', { port })` trả về `{ evaluate, close }`; ném `CdpError` (`PORT_CLOSED`, `NO_TARGET`) |
-| `lib/zalo-bridge.mjs` | `openBridge({ port })` trả về Bridge: `listGroups`, `getMessages`, `getMediaRows`, `locate`, `readOnlyGuard` |
+| `lib/zalo-bridge.mjs` | `openBridge({ port })` trả về Bridge: `listGroups`, `getMessages`, `getMediaRows`, `locate`, `readOnlyGuard`, và hai hàm tính toán `decodeJxl`, `recognizeText` (danh sách riêng `COMPUTE_ALLOWLIST`) |
 | `test/` | Test chạy bằng `node --test`, không cần Zalo |
 
 ## An toàn: chỉ đọc
 
 Mọi lời gọi vào database của Zalo đi qua `readOnlyGuard`, chỉ cho phép `getAll`, `get`, `getMulti`, `count`. Gọi tên hàm khác thì ném lỗi ngay, cả ở phía Node lẫn trong trang Zalo (hai phía dùng chung một danh sách và một đoạn mã). Không gọi `insert`, `put`, `update`, `delete`, không gửi tin, không thao tác giao diện Zalo. `zmi files` đọc `Media.File` qua đúng cầu nối này và tải file bằng một `GET` thường từ Node; không gọi bộ tải của Zalo (`$zdownload`) và không ghi gì vào thư mục dữ liệu của Zalo (chỉ chép từ đó ra `data/files/`).
+
+`zmi images` dùng thêm một danh sách **riêng**, `COMPUTE_ALLOWLIST`, gồm đúng ba hàm chỉ tính toán của Zalo: `libjxl.decodeToJpeg` (byte JXL vào, byte JPEG ra), `ocr.recognize` (đọc chữ trong một file ảnh) và `ocr.isSupported`. Danh sách này cũng được kiểm ở cả hai phía như danh sách đọc kho; danh sách đọc kho không đổi (`getAll`, `get`, `getMulti`, `count`). OCR chỉ được đưa file tạm của zmi trong `data/images/.tmp/`: đường dẫn tương đối, có `..`, hay nằm trong `ZaloData`/`ZaloPC` bị từ chối ở cả hai phía. Ảnh trong cache Zalo do Node đọc rồi chép ra, không bao giờ đưa thẳng cho Zalo.
 
 Dữ liệu (`data/`), bản xuất (`exports/`) và dữ liệu thô dùng cho test (`test/fixtures/raw/`) chứa nội dung chat thật nên đã nằm trong `.gitignore`. Không commit chúng.
 

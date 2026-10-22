@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // zmi: reads Zalo group messages from the running Zalo PC app into a private DB for market-intelligence reports.
-// Commands so far: doctor, groups, sync, files.
+// Commands so far: doctor, groups, sync, files, images.
 
 import './lib/suppress-sqlite-warning.mjs'; // before anything loads node:sqlite (see the dynamic import of lib/db.mjs below)
 import { parseArgs } from 'node:util';
@@ -13,6 +13,7 @@ import {
 } from './lib/groups.mjs';
 import { syncAll, resolveTargets, storedCount, formatGroupLine, formatErrorLines, formatTotalLine, SyncUsageError } from './lib/sync.mjs';
 import { resolveAndReport, filesStatusLine } from './lib/files.mjs';
+import { scanAndReport, imagesStatusLine } from './lib/images.mjs';
 
 // Dynamic on purpose. ESM loads a static `node:sqlite` import before any module body runs, so its ExperimentalWarning
 // would fire before the filter in suppress-sqlite-warning.mjs exists. Loaded here, the filter is already in place.
@@ -34,13 +35,15 @@ Lệnh:
   groups      Hiện danh sách nhóm và nhóm nào đang theo dõi (đọc từ config/groups.json, không cần mở Zalo)
   sync        Đọc tin của các nhóm đang theo dõi từ Zalo (chỉ đọc) vào data/zalo-mi.db: lần đầu lấy hết lịch sử, các lần sau chỉ lấy tin mới; cuối cùng lưu file đính kèm mới vào data/files/
   files       Lưu file đính kèm chưa xử lý vào data/files/ (chép từ máy hoặc tải theo link); không cần mở Zalo
+  images      Quét chữ trong ảnh chưa quét (OCR của Zalo, cần mở Zalo); ảnh có chữ được lưu thành JPEG vào data/images/
 
 Tùy chọn:
   --refresh   Với "groups": đọc lại danh sách nhóm từ Zalo (chỉ đọc), cập nhật database và config/groups.json
   --full      Với "sync": đọc lại toàn bộ lịch sử của mỗi nhóm thay vì chỉ tin mới
   --groups A,B  Với "sync": chỉ đồng bộ các nhóm này (convId cách nhau bằng dấu phẩy) thay vì mọi nhóm đang theo dõi
   --retry     Với "files": thử lại cả file lỗi và file chỉ có link
-  --limit N   Với "files": chỉ xử lý N file (mới nhất trước)
+  --limit N   Với "files": chỉ xử lý N file (mới nhất trước); với "images": chỉ quét N ảnh (theo thứ tự ưu tiên)
+  --rescan    Với "images": quét lại mọi ảnh, kể cả ảnh đã quét
   --port N    Cổng debug của Zalo (mặc định ${DEFAULT_PORT})
   -h, --help  Hiện hướng dẫn này
 `;
@@ -341,10 +344,44 @@ export async function filesCommand({ retry = false, limit, port, open = openBrid
   }
 }
 
+/**
+ * zmi images [--limit N] [--rescan]. Scans the images that were never scanned (or failed last time) with Zalo's own OCR and
+ * JXL decoder (read-only bridge + compute allowlist) and stores the ones with text under data/images/. Zalo must be open:
+ * when it is not, prints how to open it and writes nothing.
+ * `open`, `dbPath` and `imageOptions` (fetchFn, lookup, statfs, appData, ... for scanImages) are injectable so this can run
+ * against a fake Zalo and a scratch directory.
+ * Exit code: 0 done, 1 no database / Zalo closed / the run stopped early.
+ */
+export async function imagesCommand({ limit, rescan = false, port, open = openBridge, dbPath = DB_PATH, imageOptions = {} }) {
+  if (!existsSync(dbPath)) {
+    console.error('Chưa có database (data/zalo-mi.db). Hãy chạy trước: node zmi.mjs sync');
+    return 1;
+  }
+  let bridge;
+  try {
+    bridge = await open({ port });
+  } catch (error) {
+    return reportOpenFailure(error, port);
+  }
+  const db = openDb(dbPath);
+  try {
+    const summary = await scanAndReport(db, { rootDir: rootDirOf(dbPath), bridge, limit, rescan, ...imageOptions });
+    if (summary.total === 0) console.log(rescan ? 'Không có ảnh nào cần quét.' : 'Không có ảnh nào cần quét (quét lại mọi ảnh bằng --rescan).');
+    console.log(imagesStatusLine(db));
+    return summary.diskStop || summary.aborted ? 1 : 0;
+  } catch (error) {
+    console.error(`Không quét được ảnh: ${error.message}`);
+    return 1;
+  } finally {
+    bridge.close();
+    db.close();
+  }
+}
+
 async function main(argv) {
   let parsed;
   try {
-    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, refresh: { type: 'boolean' }, full: { type: 'boolean' }, groups: { type: 'string' }, retry: { type: 'boolean' }, limit: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
+    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, refresh: { type: 'boolean' }, full: { type: 'boolean' }, groups: { type: 'string' }, retry: { type: 'boolean' }, rescan: { type: 'boolean' }, limit: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
   } catch (error) {
     console.error(`${error.message}\n\n${USAGE}`);
     return 2;
@@ -362,8 +399,16 @@ async function main(argv) {
     return 2;
   }
 
-  if ((values.retry || values.limit !== undefined) && command !== 'files') {
-    console.error(`--retry và --limit chỉ dùng với lệnh files.\n\n${USAGE}`);
+  if (values.retry && command !== 'files') {
+    console.error(`--retry chỉ dùng với lệnh files.\n\n${USAGE}`);
+    return 2;
+  }
+  if (values.rescan && command !== 'images') {
+    console.error(`--rescan chỉ dùng với lệnh images.\n\n${USAGE}`);
+    return 2;
+  }
+  if (values.limit !== undefined && command !== 'files' && command !== 'images') {
+    console.error(`--limit chỉ dùng với lệnh files và images.\n\n${USAGE}`);
     return 2;
   }
   let limit;
@@ -390,6 +435,8 @@ async function main(argv) {
       return syncCommand({ full: Boolean(values.full), groups: values.groups, port });
     case 'files':
       return filesCommand({ retry: Boolean(values.retry), limit, port });
+    case 'images':
+      return imagesCommand({ rescan: Boolean(values.rescan), limit, port });
     default:
       console.error(`${command ? `Lệnh không biết: "${command}".` : 'Thiếu lệnh.'}\n\n${USAGE}`);
       return 2;

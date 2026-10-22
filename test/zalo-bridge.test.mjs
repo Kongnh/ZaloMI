@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { readOnlyGuard, STORE_ALLOWLIST, buildPageScript, createBridge } from '../lib/zalo-bridge.mjs';
+import { readOnlyGuard, STORE_ALLOWLIST, COMPUTE_ALLOWLIST, computeGuard, isOwnImagePath, buildPageScript, createBridge } from '../lib/zalo-bridge.mjs';
 
 // ---------------------------------------------------------------------------
 // readOnlyGuard (pure, no Zalo needed)
@@ -71,7 +71,7 @@ function makeIndexedStore({ rows, keyOf, indexName, log, storeName, requireParti
   return store;
 }
 
-function makeFakeZalo({ moduleId = 'fsN4', messages = [], groups = [], media = {}, withModule = true, withWebpack = true } = {}) {
+function makeFakeZalo({ moduleId = 'fsN4', messages = [], groups = [], media = {}, withModule = true, withWebpack = true, features } = {}) {
   const log = [];
   const instance = {
     Core: {
@@ -97,7 +97,8 @@ function makeFakeZalo({ moduleId = 'fsN4', messages = [], groups = [], media = {
   const window = withWebpack
     ? { webpackJsonp: { push([ids, modules]) { modules[ids[0]](null, null, req); } } }
     : {};
-  const context = vm.createContext({ window });
+  if (features) window.$zFeatures = features;
+  const context = vm.createContext({ window, atob, btoa });
   const connection = {
     // Mirrors Runtime.evaluate with returnByValue: result is a JSON round trip, promises are awaited.
     async evaluate(expression) {
@@ -395,4 +396,115 @@ test('Bridge exposes readOnlyGuard and refuses non-allowlisted calls before any 
   const bridge = await createBridge(connection);
   assert.equal(bridge.readOnlyGuard, readOnlyGuard);
   assert.throws(() => bridge.readOnlyGuard('insert'));
+});
+
+// ---------------------------------------------------------------------------
+// Pure-compute calls (ruling R2): Zalo's JXL decoder and OCR, through a separate allowlist
+// ---------------------------------------------------------------------------
+
+/** Fake $zFeatures: every function records its call; only the allowlisted ones may ever run. */
+function fakeFeatures(log, { ocrResult } = {}) {
+  const rec = (name, fn) => (...args) => { log.push(name); return fn(...args); };
+  return {
+    libjxl: {
+      // Real shape: Uint8Array in, { status_code: 1, data: Uint8Array } out. The fake "decodes" by prefixing a JPEG marker.
+      decodeToJpeg: rec('libjxl.decodeToJpeg', async (bytes, quality) => ({ status_code: 1, data: new Uint8Array([0xff, 0xd8, quality, ...bytes]) })),
+      encodeJxl: rec('libjxl.encodeJxl', async () => ({})),
+      getJxlInfo: rec('libjxl.getJxlInfo', async () => ({})),
+    },
+    ocr: {
+      recognize: rec('ocr.recognize', async path => ocrResult ?? {
+        success: true,
+        result: { engineId: 'x', lines: [{ text: `đọc ${path}`, scores: { detection: 0.9, recognition: 0.97 }, words: [], quad: {} }] },
+      }),
+      isSupported: rec('ocr.isSupported', async () => ({ supported: true })),
+      prewarm: rec('ocr.prewarm', async () => {}),
+    },
+    zaloCall: { call: rec('zaloCall.call', async () => {}) },
+  };
+}
+
+test('the compute allowlist is exactly the JXL decoder and OCR, and the store allowlist is unchanged', () => {
+  assert.deepEqual([...COMPUTE_ALLOWLIST].sort(), ['libjxl.decodeToJpeg', 'ocr.isSupported', 'ocr.recognize']);
+  assert.deepEqual([...STORE_ALLOWLIST].sort(), ['count', 'get', 'getAll', 'getMulti']);
+  for (const name of COMPUTE_ALLOWLIST) assert.throws(() => readOnlyGuard(name), 'a compute name is never a store method');
+  for (const name of STORE_ALLOWLIST) assert.throws(() => computeGuard(name), 'a store method is never a compute call');
+});
+
+test('computeGuard rejects every other Zalo function name', () => {
+  for (const name of ['libjxl.encodeJxl', 'libjxl.getJxlInfo', 'ocr.prewarm', 'zaloCall.call', 'syncDownload.start', 'libjxl', 'ocr',
+    'ocr.recognize ', 'OCR.recognize', '__proto__', '', undefined, null, 7, ['ocr.recognize']]) {
+    assert.throws(() => computeGuard(name), Error, `${String(name)} must be rejected`);
+  }
+  for (const name of COMPUTE_ALLOWLIST) assert.doesNotThrow(() => computeGuard(name));
+});
+
+test('isOwnImagePath accepts our own absolute files and refuses Zalo data folders and relative paths', () => {
+  assert.equal(isOwnImagePath(String.raw`C:\Users\x\repo\data\images\.tmp\1.jpg`), true);
+  assert.equal(isOwnImagePath('/tmp/zmi/1.jpg'), true);
+  for (const p of [String.raw`C:\Users\x\AppData\Roaming\ZaloData\media\1\a.jpg`, 'C:/Users/x/AppData/Local/ZaloPC/1/ZaloDownloads/a.jpg',
+    String.raw`data\images\1.jpg`, String.raw`..\x.jpg`, '', null, 3]) {
+    assert.equal(isOwnImagePath(p), false, String(p));
+  }
+});
+
+test('decodeJxl sends bytes in and gets JPEG bytes out through libjxl.decodeToJpeg only', async () => {
+  const log = [];
+  const { connection } = makeFakeZalo({ features: fakeFeatures(log) });
+  const bridge = await createBridge(connection);
+  const out = await bridge.decodeJxl(Buffer.from([0xff, 0x0a, 1, 2, 3]), { quality: 90 });
+  assert.ok(Buffer.isBuffer(out));
+  assert.deepEqual([...out], [0xff, 0xd8, 90, 0xff, 0x0a, 1, 2, 3]);
+  assert.deepEqual(log, ['libjxl.decodeToJpeg']);
+});
+
+test('decodeJxl fails when Zalo reports a decode error status', async () => {
+  const log = [];
+  const features = fakeFeatures(log);
+  features.libjxl.decodeToJpeg = async () => ({ status_code: 2002 });
+  const { connection } = makeFakeZalo({ features });
+  const bridge = await createBridge(connection);
+  await assert.rejects(bridge.decodeJxl(Buffer.from([0xff, 0x0a])), /JXL/);
+});
+
+test('recognizeText returns the OCR lines (text + recognition score) for our own file', async () => {
+  const log = [];
+  const { connection } = makeFakeZalo({ features: fakeFeatures(log) });
+  const bridge = await createBridge(connection);
+  const own = String.raw`C:\repo\data\images\.tmp\5.jpg`;
+  const result = await bridge.recognizeText(own);
+  assert.deepEqual(result, { lines: [{ text: `đọc ${own}`, recognition: 0.97 }] });
+  assert.deepEqual(await bridge.ocrSupported(), { supported: true });
+  assert.deepEqual(log, ['ocr.recognize', 'ocr.isSupported']);
+});
+
+test('recognizeText refuses a path inside Zalo data on both sides, and an OCR failure becomes an error', async () => {
+  const log = [];
+  const { connection } = makeFakeZalo({ features: fakeFeatures(log, { ocrResult: { success: false, error: { message: 'Failed to decode image', code: 102 } } }) });
+  const bridge = await createBridge(connection);
+  await assert.rejects(bridge.recognizeText(String.raw`C:\Users\x\AppData\Roaming\ZaloData\media\1\a.jpg`), /Zalo/);
+  // The page refuses it too, even when the Node side is bypassed.
+  const zaloPath = JSON.stringify(String.raw`C:\x\ZaloData\a.jpg`);
+  await assert.rejects(connection.evaluate(`window.__zmi.compute("ocr.recognize", [${zaloPath}])`), /Zalo/);
+  assert.deepEqual(log, [], 'OCR never ran on a Zalo path');
+  await assert.rejects(bridge.recognizeText(String.raw`C:\repo\data\images\.tmp\5.jpg`), /Failed to decode image/);
+});
+
+test('a Zalo build without the decoder or OCR says so and what to do, instead of a bare TypeError', async () => {
+  const { connection } = makeFakeZalo({ features: {} });
+  const bridge = await createBridge(connection);
+  await assert.rejects(bridge.ocrSupported(), /không có OCR.*cập nhật/s);
+  await assert.rejects(bridge.recognizeText(String.raw`C:\repo\data\images\.tmp\5.jpg`), /không có OCR.*cập nhật/s);
+  await assert.rejects(bridge.decodeJxl(Buffer.from([0xff, 0x0a])), /không có bộ giải mã JXL.*cập nhật/s);
+});
+
+test('page-side compute refuses names outside the compute allowlist and never reaches them', async () => {
+  const log = [];
+  const { connection } = makeFakeZalo({ features: fakeFeatures(log) });
+  await createBridge(connection);
+  for (const name of ['libjxl.encodeJxl', 'ocr.prewarm', 'zaloCall.call', 'getAll']) {
+    await assert.rejects(connection.evaluate(`window.__zmi.compute(${JSON.stringify(name)}, [])`), /chỉ cho phép/);
+  }
+  assert.deepEqual(log, []);
+  assert.ok(buildPageScript().includes(JSON.stringify(COMPUTE_ALLOWLIST)), 'compute allowlist literal is embedded in the page script');
 });
