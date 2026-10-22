@@ -1,0 +1,45 @@
+{
+  "msgId": "7191342694770_004",
+  "cliMsgId": "1762323835037",
+  "msgType": -4,
+  "sendDttm": "1762323835037",
+  "fromUid": null,
+  "dName": null,
+  "message": "Người D chỉ cho phép trưởng/phó cộng đồng xem đầy đủ danh sách thành viên.",
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": {
+    "source": {
+      "id": "2720773113540592957",
+      "dName": "Người D"
+    },
+    "updateInfo": {
+      "blockName": 1,
+      "signAdminMsg": 0,
+      "addMemberOnly": 1,
+      "setTopicOnly": 0,
+      "enableMsgHistory": 1,
+      "joinAppr": 1,
+      "lockCreatePost": 0,
+      "lockCreatePoll": 0,
+      "lockSendMsg": 0,
+      "lockViewMember": 1,
+      "bannFeature": 0,
+      "dirtyMedia": 0,
+      "banDuration": 0,
+      "subAct": "lock_view_member"
+    }
+  },
+  "updateMemberIds": null,
+  "act": "update_setting",
+  "subType": null,
+  "msgText": null
+}

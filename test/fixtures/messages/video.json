@@ -1,0 +1,40 @@
+{
+  "msgId": "7337525800344",
+  "cliMsgId": "1765979415995",
+  "msgType": 18,
+  "sendDttm": "1765979459238",
+  "fromUid": "1548694058651961729",
+  "dName": "Người S",
+  "message": {
+    "action": "",
+    "description": "",
+    "childnumber": 0,
+    "duration": 34000,
+    "params": "{\"fileSize\":5587270,\"video_height\":1080,\"video_width\":1920,\"video_rotation\":0,\"duration\":34000}",
+    "oriUrl": "https://f128-zvc.dlmd.me/gr/aa104256dbeb36b56ffa/5222783962785960944",
+    "thumbUrl": "https://photo-stal-16.zdn.vn/gr/480a1535c95c0102584d/1444630672150334561.jpg",
+    "title": "",
+    "type": ""
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": "C:\\Users\\kongn\\AppData\\Roaming\\ZaloData\\media\\g8318398124727869839\\ZaloDownloads\\video\\group\\7337525800344",
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": {
+    "color": -1,
+    "size": -1,
+    "type": 1,
+    "subType": 0,
+    "ext": "{\"shouldParseLinkOrContact\":0}"
+  },
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

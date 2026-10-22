@@ -1,0 +1,35 @@
+{
+  "msgId": "7802614660994",
+  "cliMsgId": "1778204058337",
+  "msgType": 19,
+  "sendDttm": "1778204058817",
+  "fromUid": "505116342737119229",
+  "dName": "Người E",
+  "message": {
+    "title": "TOU-Analysis_SolarBESS_Final-REVISED_VIE.pdf",
+    "description": "",
+    "href": "https://file-stal-11.dlfl.vn/gr/089905546020a07ef931/3524762770336085979",
+    "thumb": "https://f64-zpg-r.zdn.vn/6462652297051370106/fbc793b9e0ac61f238bd.jpg",
+    "childnumber": 0,
+    "action": "",
+    "params": "{\"fileSize\":\"4328543\",\"checksum\":\"e63eb2d93995adaebbb1b378a4566040\",\"fileExt\":\"pdf\",\"tWidth\":799,\"tHeight\":298,\"duration\":0,\"fType\":1,\"fdata\":\"{}\"}",
+    "type": ""
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": "C:\\Users\\kongn\\Downloads\\TOU-Analysis_SolarBESS_Final-REVISED_VIE.pdf",
+  "folderPath": "",
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": {
+    "bigRes": true
+  },
+  "properties": null,
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

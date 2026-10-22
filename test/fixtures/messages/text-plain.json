@@ -1,0 +1,30 @@
+{
+  "msgId": "7187011054657",
+  "cliMsgId": "1762225775408",
+  "msgType": 1,
+  "sendDttm": "1762225775559",
+  "fromUid": "7931386021335555566",
+  "dName": "Người A",
+  "message": "Thông tin cập nhật bổ ích, cám ơn",
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": {
+    "color": 0,
+    "size": 0,
+    "type": 0,
+    "subType": 0,
+    "ext": "{\"shouldParseLinkOrContact\":0}"
+  },
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

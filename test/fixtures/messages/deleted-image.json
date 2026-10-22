@@ -1,0 +1,26 @@
+{
+  "msgId": "6975565152049",
+  "cliMsgId": "1756961487675",
+  "msgType": -27,
+  "sendDttm": "1756961487675",
+  "fromUid": "4954345913288697662",
+  "dName": "Người Q",
+  "message": {
+    "params": "{\"is_group_layout\":1,\"id_in_group\":2,\"is_original\":0,\"width\":960,\"group_layout_id\":1756961480,\"height\":1280,\"total_item_in_group\":3,\"hd\":null}"
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

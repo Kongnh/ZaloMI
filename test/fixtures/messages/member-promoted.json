@@ -1,0 +1,41 @@
+{
+  "msgId": "7108850878862_003",
+  "cliMsgId": "1760188676421",
+  "msgType": -4,
+  "sendDttm": "1760188676421",
+  "fromUid": null,
+  "dName": null,
+  "message": "Người M đã được bổ nhiệm thành phó cộng đồng",
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": {
+    "source": {
+      "id": "2720773113540592957",
+      "dName": "Người D"
+    },
+    "updateMembers": [
+      {
+        "id": "5704052647158367703",
+        "dName": "Người M",
+        "avatar": "https://s160-ava-talk.zadn.vn/default",
+        "type": 0,
+        "avatar_25": "https://s160-ava-talk.zadn.vn/default"
+      }
+    ],
+    "updateInfo": null
+  },
+  "updateMemberIds": [
+    "5704052647158367703"
+  ],
+  "act": "add_admin",
+  "subType": null,
+  "msgText": null
+}

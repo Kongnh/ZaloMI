@@ -1,0 +1,30 @@
+{
+  "msgId": "8303921399662",
+  "cliMsgId": "1790328455746",
+  "msgType": 20,
+  "sendDttm": "1790328456583",
+  "fromUid": "2720773113540592957",
+  "dName": "Người D",
+  "message": "[Tin nhắn đã được thu hồi]",
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": {
+    "color": 0,
+    "size": 0,
+    "type": 0,
+    "subType": 0,
+    "ext": "{\"shouldParseLinkOrContact\":0}"
+  },
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

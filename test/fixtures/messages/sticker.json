@@ -1,0 +1,34 @@
+{
+  "msgId": "7958936058829",
+  "cliMsgId": "1782000950993",
+  "msgType": 4,
+  "sendDttm": "1782000951068",
+  "fromUid": "189590260515078494",
+  "dName": "Người R",
+  "message": {
+    "id": 17874,
+    "catId": 10123,
+    "type": 3
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": {
+    "color": -1,
+    "size": -1,
+    "type": 1,
+    "subType": 0,
+    "ext": "{\"shouldParseLinkOrContact\":0}"
+  },
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

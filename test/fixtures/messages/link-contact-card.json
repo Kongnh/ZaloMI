@@ -1,0 +1,33 @@
+{
+  "msgId": "6906400195826",
+  "cliMsgId": "1755159800153",
+  "msgType": 6,
+  "sendDttm": "1755159800514",
+  "fromUid": "6841911686842158860",
+  "dName": "Người I",
+  "message": {
+    "title": "Người I",
+    "description": "{\"phone\":\"0900 000 000\",\"qrCodeUrl\":\"https:\\/\\/qr-talk.zdn.vn\\/redacted\\/redacted.jpg\"}",
+    "href": "www.zaloapp.com",
+    "thumb": "https://s160-ava-talk.zadn.vn/default",
+    "childnumber": 0,
+    "action": "recommened.user",
+    "params": "6841911686842158860",
+    "type": ""
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

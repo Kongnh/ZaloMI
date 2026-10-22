@@ -1,0 +1,27 @@
+{
+  "msgId": "7685750513620",
+  "cliMsgId": "1775176367945",
+  "msgType": 20,
+  "sendDttm": "1775176368019",
+  "fromUid": "3275852546022078857",
+  "dName": "Người O",
+  "message": {
+    "catId": 0,
+    "id": 0
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

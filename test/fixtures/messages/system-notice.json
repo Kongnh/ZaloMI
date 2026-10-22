@@ -1,0 +1,33 @@
+{
+  "msgId": "7547924592015",
+  "cliMsgId": "1771553690166",
+  "msgType": -1909,
+  "sendDttm": "1771553690166",
+  "fromUid": "2720773113540592957",
+  "dName": "Người D",
+  "message": {
+    "title": "Người D cho phép tất cả thành viên được gửi tin nhắn vào cộng đồng.",
+    "description": "",
+    "href": "",
+    "thumb": "",
+    "childnumber": 0,
+    "action": "msginfo.actionlist",
+    "params": "{\"msg\":{\"vi\":\"%1$s cho phép tất cả thành viên được gửi tin nhắn vào cộng đồng.\",\"en\":\"%1$s allowed everyone to send messages in this community.\",\"my\":\"%1$s allowed everyone to send messages in this community.\"},\"avatarUrl\":[\"https://s160-ava-talk.zadn.vn/default\"],\"simpleInfos\":[{\"uid\":\"2720773113540592957\",\"dpn\":\"Người D\",\"avt\":\"https://s160-ava-talk.zadn.vn/default\"}],\"highLightsV2\":[{\"uid\":\"2720773113540592957\",\"dpn\":\"Người D\",\"ignoreNickname\":0,\"type\":0,\"ts\":0}],\"iconUrl\":\"\",\"actions\":[{\"actionType\":\"\",\"actionColor\":-16538118,\"actionData\":\"\",\"actionLabel\":\"\"}],\"totalUpdateMem\":1,\"highLights\":[{\"uid\":\"2720773113540592957\",\"len\":10,\"pos\":0}]}",
+    "type": ""
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

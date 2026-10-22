@@ -1,0 +1,39 @@
+{
+  "msgId": "8304978773112",
+  "cliMsgId": "1790345412531",
+  "msgType": 6,
+  "sendDttm": "1790345414082",
+  "fromUid": "4168407517877453350",
+  "dName": "Người H",
+  "message": {
+    "title": "https://baodautu.vn/stavian-nghien-cuu-dau-tu-khu-cong-nghe-so-300-ha-tai-tphcm-d706748.html",
+    "description": "Tập đoàn Stavian nghiên cứu đầu tư dự án khu công nghệ số tập trung với quy mô 300 ha tại TP.HCM để hướng tới phục vụ các trung tâm dữ liệu AI và điện toán đám mây.",
+    "href": "https://baodautu.vn/stavian-nghien-cuu-dau-tu-khu-cong-nghe-so-300-ha-tai-tphcm-d706748.html",
+    "thumb": "https://photo-stal-11.zdn.vn/gr/b168dde495304a6e1321/2aOboR18MCGhoeDZ1zbUHoIY3ON6sJ0tbGGxasnw.jpg",
+    "childnumber": 0,
+    "action": "recommened.link",
+    "params": "{\"tWidth\":470,\"thumb_src_type\":1,\"src\":\"baodautu.vn\",\"tHeight\":250,\"tType\":1,\"linkType\":0,\"type\":0,\"expired_time\":0,\"icon\":\"https:\\/\\/baodautu.vn\\/favicon.ico\",\"mediaTitle\":\"Stavian nghiên cứu đầu tư khu công nghệ số 300 ha tại TP.HCM\"}",
+    "type": ""
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": {
+    "color": -1,
+    "size": -1,
+    "type": 1,
+    "subType": 0,
+    "ext": "{\"shouldParseLinkOrContact\":0}"
+  },
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}
