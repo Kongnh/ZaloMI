@@ -141,7 +141,7 @@ Vietnamese, clear and plain, short sentences, bullets and tables like the PEWG r
 
 Drop a section that has nothing and say "Không có tin đáng chú ý trong kỳ." instead of padding. File paths in section 8 are absolute Windows paths from the export.
 
-Save to `C:\Users\kongn\Downloads\Zalo_MI_Report_<YYYY-MM-DD from>_den_<YYYY-MM-DD to>.md`. If that file exists, add `_v2`, `_v3`… rather than overwriting.
+Always save to `C:\Users\kongn\OneDrive\Máy tính\New Topic\00. Market intel\Zalo_MI_Report_<YYYY-MM-DD from>_den_<YYYY-MM-DD to>.md` (Cong's choice; the folder syncs through OneDrive). If that file exists, add `_v2`, `_v3`… rather than overwriting. If the folder is missing, create it (only it, not other parts of OneDrive).
 
 **Before saving, check for leaks**: search the draft for phone-like digit runs (`0` + 8–10 digits with optional spaces/dots, `+84…`) and `@`. Remove any that are personal.
 
