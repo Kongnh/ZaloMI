@@ -364,3 +364,62 @@ test('conv_id/ts indexes exist on every message-keyed table', () => {
   }
   db.close();
 });
+
+test('id columns must be strings: a number would be stored as "123.0" and later duplicate the row', () => {
+  const { db } = memDb();
+  const idColumns = {
+    groups: ['conv_id'],
+    messages: ['msg_id', 'conv_id', 'cli_msg_id', 'from_uid', 'quote_msg_id'],
+    links: ['msg_id', 'conv_id'],
+    files: ['msg_id', 'conv_id'],
+    images: ['msg_id', 'conv_id'],
+    member_events: ['msg_id', 'conv_id'],
+  };
+  const upserts = {
+    groups: db.upsertGroup, messages: db.upsertMessage, links: db.upsertLink,
+    files: db.upsertFile, images: db.upsertImage, member_events: db.upsertMemberEvent,
+  };
+  for (const [table, cols] of Object.entries(idColumns)) {
+    const pk = table === 'groups' ? 'conv_id' : 'msg_id';
+    for (const col of cols) {
+      for (const bad of [123, 7243489503495003628n]) {
+        const row = { [pk]: 'id1', [col]: bad };
+        assert.throws(() => upserts[table](row), err => err instanceof TypeError && err.message.includes(`${table}.${col}`),
+          `${table}.${col} rejects ${typeof bad}`);
+      }
+    }
+    assert.equal(count(db, table), 0, `${table}: nothing was written`);
+  }
+
+  // Non-primary-key id columns may still be null/absent.
+  db.upsertMessage({ msg_id: 'id1', conv_id: 'g1', cli_msg_id: null, quote_msg_id: undefined });
+  assert.equal(count(db, 'messages'), 1);
+  assert.throws(() => db.upsertMessage({ msg_id: null, conv_id: 'g1' }), /msg_id/);
+  db.close();
+});
+
+test('19-digit string ids round-trip exactly and re-upserting the same id keeps one row', () => {
+  const { db } = memDb();
+  const msgId = '7243489503495003628'; // beyond 2^53: a JS number could not hold it
+  const convId = 'g8318398124727869839';
+  db.upsertMessage({ msg_id: msgId, conv_id: convId, cli_msg_id: '7243489503495003629', from_uid: '1498602681856850483', ts: 1, text: 'a' });
+  db.upsertMessage({ msg_id: msgId, conv_id: convId, cli_msg_id: '7243489503495003629', from_uid: '1498602681856850483', ts: 1, text: 'b' });
+  assert.equal(count(db, 'messages'), 1);
+  const row = db.raw.prepare('SELECT * FROM messages').get();
+  assert.equal(row.msg_id, msgId);
+  assert.equal(row.cli_msg_id, '7243489503495003629');
+  assert.equal(row.from_uid, '1498602681856850483');
+  assert.equal(db.maxTs(convId), 1);
+  assert.deepEqual(db.search('b', { convIds: [convId] }).map(r => r.msg_id), [msgId]);
+  db.close();
+});
+
+test('maxTs and search reject a numeric conversation id instead of silently matching nothing', () => {
+  const { db } = memDb();
+  db.upsertMessage(msg({ conv_id: '123', text: 'solar' }));
+  assert.throws(() => db.maxTs(123), /conv_id/);
+  assert.throws(() => db.search('solar', { convIds: [123] }), /conv_id/);
+  assert.equal(db.maxTs('123'), 1000);
+  assert.deepEqual(db.search('solar', { convIds: ['123'] }).map(r => r.msg_id), ['m1']);
+  db.close();
+});
