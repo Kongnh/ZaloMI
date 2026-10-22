@@ -22,13 +22,14 @@ test('doctor on a closed port prints Vietnamese guidance, exits non-zero and lea
   const port = await freePort();
   const dataDir = join(root, 'data');
   const before = existsSync(dataDir) ? readdirSync(dataDir) : null;
+  const dbExisted = existsSync(join(dataDir, 'zalo-mi.db')); // true once `zmi groups --refresh` has run on this machine
 
   const run = spawnSync(process.execPath, ['--no-warnings', join(root, 'zmi.mjs'), 'doctor', '--port', String(port)], { encoding: 'utf8' });
 
   assert.notEqual(run.status, 0, 'non-zero exit code');
   assert.match(run.stdout, /✗/);
   assert.match(run.stdout, /Zalo \(MI\)/, 'tells the user how to open Zalo in collection mode');
-  assert.ok(!existsSync(join(dataDir, 'zalo-mi.db')), 'doctor never creates the database');
+  assert.equal(existsSync(join(dataDir, 'zalo-mi.db')), dbExisted, 'doctor never creates the database');
   const after = existsSync(dataDir) ? readdirSync(dataDir) : null;
   assert.deepEqual(after, before, 'doctor leaves data/ untouched on a closed port');
 });

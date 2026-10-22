@@ -198,14 +198,14 @@ test('page-side reader refuses unsafe db/store names', async () => {
 
 test('listGroups maps the Group store rows', async () => {
   const groups = [
-    { userId: 'g111', displayName: 'Nhóm A', totalMember: 12, isGroup: true, desc: 'ignored' },
+    { userId: 'g111', displayName: 'Nhóm A', totalMember: 12, isGroup: true, desc: 'Mô tả nhóm A', creatorId: 'ignored' },
     { userId: 'g222', displayName: 'Nhóm B', totalMember: 3, isGroup: true },
   ];
   const { connection, log } = makeFakeZalo({ groups });
   const bridge = await createBridge(connection);
   assert.deepEqual(await bridge.listGroups(), [
-    { convId: 'g111', name: 'Nhóm A', totalMember: 12, isGroup: true },
-    { convId: 'g222', name: 'Nhóm B', totalMember: 3, isGroup: true },
+    { convId: 'g111', name: 'Nhóm A', description: 'Mô tả nhóm A', totalMember: 12, isGroup: true },
+    { convId: 'g222', name: 'Nhóm B', description: null, totalMember: 3, isGroup: true },
   ]);
   const call = log.find(e => e.store === 'Core.Group');
   assert.equal(call.range, undefined, 'Group.getAll(undefined, ...) gets a real undefined, not null');

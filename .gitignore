@@ -2,3 +2,4 @@ data/
 exports/
 node_modules/
 test/fixtures/raw/
+config/groups.json

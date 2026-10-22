@@ -1,22 +1,34 @@
 #!/usr/bin/env node
 // zmi: reads Zalo group messages from the running Zalo PC app into a private DB for market-intelligence reports.
-// Commands so far: doctor.
+// Commands so far: doctor, groups.
 
+import './lib/suppress-sqlite-warning.mjs'; // before anything loads node:sqlite (see the dynamic import of lib/db.mjs below)
 import { parseArgs } from 'node:util';
-import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { openBridge, BridgeError } from './lib/zalo-bridge.mjs';
 import { CdpError } from './lib/cdp.mjs';
+import {
+  GroupsConfigError, mergeGroups, readGroupsConfig, writeGroupsConfig, saveGroupsToDb, readMemberCounts, formatGroupsTable,
+} from './lib/groups.mjs';
+
+// Dynamic on purpose. ESM loads a static `node:sqlite` import before any module body runs, so its ExperimentalWarning
+// would fire before the filter in suppress-sqlite-warning.mjs exists. Loaded here, the filter is already in place.
+const { openDb } = await import('./lib/db.mjs');
 
 const DEFAULT_PORT = 9222;
 const DATA_DIR = join(import.meta.dirname, 'data');
+const DB_PATH = join(DATA_DIR, 'zalo-mi.db');
+const GROUPS_CONFIG_PATH = join(import.meta.dirname, 'config', 'groups.json');
 
 const USAGE = `Cách dùng: node zmi.mjs <lệnh> [tùy chọn]
 
 Lệnh:
   doctor      Kiểm tra: cổng debug của Zalo, module database, đọc thử 1 tin, quyền ghi thư mục data/
+  groups      Hiện danh sách nhóm và nhóm nào đang theo dõi (đọc từ config/groups.json, không cần mở Zalo)
 
 Tùy chọn:
+  --refresh   Với "groups": đọc lại danh sách nhóm từ Zalo (chỉ đọc), cập nhật database và config/groups.json
   --port N    Cổng debug của Zalo (mặc định ${DEFAULT_PORT})
   -h, --help  Hiện hướng dẫn này
 `;
@@ -125,16 +137,104 @@ export async function doctor({ port, open = openBridge, dataDir = DATA_DIR }) {
   return failures === 0 ? 0 : 1;
 }
 
+/** Prints why Zalo could not be opened, as guidance for Cong. Returns the exit code. */
+function reportOpenFailure(error, port) {
+  if (error instanceof CdpError && error.code === 'PORT_CLOSED') {
+    console.error(error.message);
+    console.error(openZaloGuidance(port));
+  } else if (error instanceof CdpError && error.code === 'NO_TARGET') {
+    console.error(error.message);
+    console.error('\nZalo đang chạy với cổng debug nhưng chưa có cửa sổ chính. Hãy đăng nhập Zalo (không để ở màn hình đăng nhập/QR) rồi chạy lại.');
+  } else if (error instanceof BridgeError) {
+    console.error(error.message);
+  } else {
+    console.error(`Không kết nối được Zalo: ${error.message}`);
+  }
+  return 1;
+}
+
+/**
+ * zmi groups [--refresh]. config/groups.json holds the tracked choice; the table never shows message content.
+ * Without --refresh only the config (and, for member counts, the existing database) is read: Zalo can be closed.
+ * With --refresh the group list is read from Zalo (read-only), merged into the config and upserted into the database.
+ * `open`, `configPath` and `dbPath` are injectable so this can run against a fake Zalo and a scratch directory.
+ */
+export async function groupsCommand({ refresh = false, port, open = openBridge, configPath = GROUPS_CONFIG_PATH, dbPath = DB_PATH }) {
+  let config;
+  try {
+    config = readGroupsConfig(configPath);
+  } catch (error) {
+    if (error instanceof GroupsConfigError) { console.error(error.message); return 1; }
+    throw error;
+  }
+
+  if (!refresh) {
+    if (!config) {
+      console.error('Chưa có danh sách nhóm (config/groups.json). Hãy mở Zalo ở chế độ thu thập rồi chạy: node zmi.mjs groups --refresh');
+      return 1;
+    }
+    let memberCounts = new Map();
+    if (existsSync(dbPath)) {
+      const db = openDb(dbPath);
+      try { memberCounts = readMemberCounts(db); } finally { db.close(); }
+    }
+    console.log(formatGroupsTable(config, memberCounts));
+    return 0;
+  }
+
+  let bridge;
+  try {
+    bridge = await open({ port });
+  } catch (error) {
+    return reportOpenFailure(error, port);
+  }
+  let zaloGroups;
+  try {
+    zaloGroups = await bridge.listGroups();
+  } catch (error) {
+    console.error(`Không đọc được danh sách nhóm từ Zalo: ${error.message}`);
+    return 1;
+  } finally {
+    bridge.close();
+  }
+  if (zaloGroups.length === 0) {
+    console.error('Zalo trả về 0 nhóm (có thể Zalo chưa đăng nhập xong hoặc chưa tải danh sách nhóm). Chưa thay đổi gì; hãy thử lại sau ít phút.');
+    return 1;
+  }
+
+  const { config: merged, added, missing } = mergeGroups(config, zaloGroups);
+  writeGroupsConfig(configPath, merged);
+  const db = openDb(dbPath);
+  let memberCounts;
+  try {
+    saveGroupsToDb(db, zaloGroups, merged);
+    memberCounts = readMemberCounts(db);
+  } finally {
+    db.close();
+  }
+
+  const suggested = added.filter(g => g.tracked).length;
+  console.log(`Đã đọc ${zaloGroups.length} nhóm từ Zalo: ${added.length} nhóm mới (đề xuất theo dõi ${suggested}), ${missing.length} nhóm không còn trên Zalo.`);
+  console.log(formatGroupsTable(merged, memberCounts));
+  console.log('Đổi nhóm nào theo dõi: sửa "tracked" (true/false) trong config/groups.json; zmi giữ nguyên lựa chọn của bạn ở các lần cập nhật sau.');
+  return 0;
+}
+
 async function main(argv) {
   let parsed;
   try {
-    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
+    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, refresh: { type: 'boolean' }, help: { type: 'boolean', short: 'h' } } });
   } catch (error) {
     console.error(`${error.message}\n\n${USAGE}`);
     return 2;
   }
   const { values, positionals: [command] } = parsed;
   if (values.help) { console.log(USAGE); return 0; }
+
+  if (values.refresh && command !== 'groups') {
+    console.error(`--refresh chỉ dùng với lệnh groups.\n\n${USAGE}`);
+    return 2;
+  }
 
   const port = values.port === undefined ? DEFAULT_PORT : Number(values.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -145,6 +245,8 @@ async function main(argv) {
   switch (command) {
     case 'doctor':
       return doctor({ port });
+    case 'groups':
+      return groupsCommand({ refresh: Boolean(values.refresh), port });
     default:
       console.error(`${command ? `Lệnh không biết: "${command}".` : 'Thiếu lệnh.'}\n\n${USAGE}`);
       return 2;
