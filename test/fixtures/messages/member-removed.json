@@ -1,0 +1,41 @@
+{
+  "msgId": "8291284472519_001",
+  "cliMsgId": "1790328346246",
+  "msgType": -4,
+  "sendDttm": "1790328346246",
+  "fromUid": null,
+  "dName": null,
+  "message": "Người L được Người D  xóa khỏi cộng đồng",
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": {
+    "source": {
+      "id": "2720773113540592957",
+      "dName": "Người D"
+    },
+    "updateMembers": [
+      {
+        "id": "6260948866361988892",
+        "dName": "Người L",
+        "avatar": "https://s160-ava-talk.zadn.vn/default",
+        "type": 0,
+        "avatar_25": "https://s160-ava-talk.zadn.vn/default"
+      }
+    ],
+    "updateInfo": null
+  },
+  "updateMemberIds": [
+    "6260948866361988892"
+  ],
+  "act": "remove_member",
+  "subType": null,
+  "msgText": null
+}

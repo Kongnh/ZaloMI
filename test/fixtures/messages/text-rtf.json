@@ -1,0 +1,43 @@
+{
+  "msgId": "7468302771212",
+  "cliMsgId": "1769394911501",
+  "msgType": 1,
+  "sendDttm": "1769394912132",
+  "fromUid": "2720773113540592957",
+  "dName": "Người D",
+  "message": {
+    "title": "Nếu anh chị nào có được bản Báo cáo Tổng quan thị trường công trình xanh Việt Nam 2025 của IFC, anh chị vui lòng chia sẻ lên nhóm nhé.\n\nNgười D tìm trên trang của IFC nhưng không thấy: https://www.ifc.org/en/search?countries=Vietnam",
+    "description": "",
+    "href": "",
+    "thumb": "",
+    "childnumber": 0,
+    "action": "rtf",
+    "params": "{\"styles\":[{\"start\":28,\"len\":58,\"st\":\"i,b\"}],\"ver\":0}",
+    "type": ""
+  },
+  "quote": {
+    "ownerId": "2720773113540592957",
+    "cliMsgId": 1769394723220,
+    "globalMsgId": 7468288782843,
+    "cliMsgType": 38,
+    "ts": 1769394724390,
+    "msg": "",
+    "attach": "{\"title\":\"Báo cáo Tổng quan thị trường công trình xanh Việt Nam 2025 được IFC công bố mới đây cho thấy tính đến ngày 31/12/2025, Việt Nam đã có tổng cộng 780 tòa nhà đạt chứng nhận xanh, tương ứng với hơn 18,6 triệu m2 sàn.\\n\\nRiêng trong năm 2025, thị trường ghi nhận 196 tòa nhà mới đạt chứng nhận (tăng 20% về số lượng), tương đương 4,4 triệu m2 sàn (tăng 15% về diện tích sàn so với năm 2024). \\n\\nLàn sóng “xanh hóa” trong năm 2025 được dẫn dắt chủ yếu bởi 2 phân khúc:\\n— Chung cư (30%) \\n— Nhà xưởng công nghiệp (28%). Việc các tập đoàn đa quốc gia hoàn thiện dây chuyền sản xuất hiện đại và cam kết bền vững thông qua các chứng nhận như LEED hay EDGE đã thúc đẩy diện tích sàn công nghiệp xanh tăng 54%.\\n\\nhttps://vneconomy.vn/2025-thi-truong-cong-trinh-xanh-viet-nam-but-pha-ky-luc.htm\",\"description\":\"Năm 2025, Việt Nam ghi nhận 780 tòa nhà đạt chứng nhận xanh, với 196 tòa nhà mới, thể hiện nỗ lực xây dựng bền vững và tài chính xanh.\",\"href\":\"https://vneconomy.vn/2025-thi-truong-cong-trinh-xanh-viet-nam-but-pha-ky-luc.htm\",\"thumb\":\"https://f62-zpg-r.zdn.vn/4010649305504072025/f69c2d8ac9d647881ec7.jpg\",\"childnumber\":0,\"action\":\"recommened.link\",\"params\":\"{\\\"streamUrl\\\":\\\"\\\",\\\"mediaTitle\\\":\\\"2025: Thị trường công trình xanh Việt Nam bứt phá \\\\u201Ckỷ lục\\\\u201D\\\",\\\"stream_icon\\\":\\\"\\\",\\\"tType\\\":1,\\\"src\\\":\\\"vneconomy.vn\\\",\\\"artist\\\":\\\"\\\",\\\"tHeight\\\":630,\\\"type\\\":0,\\\"tWidth\\\":1200}\",\"type\":\"\"}",
+    "fromD": "Người D",
+    "ttl": 0
+  },
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

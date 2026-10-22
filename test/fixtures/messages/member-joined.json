@@ -1,0 +1,41 @@
+{
+  "msgId": "8287080467123_001",
+  "cliMsgId": "1790050353005",
+  "msgType": -4,
+  "sendDttm": "1790050353005",
+  "fromUid": null,
+  "dName": null,
+  "message": "Người K đã tham gia cộng đồng",
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": {
+    "source": {
+      "id": "1258063758797981322",
+      "dName": "Người K"
+    },
+    "updateMembers": [
+      {
+        "id": "1258063758797981322",
+        "dName": "Người K",
+        "avatar": "https://s160-ava-talk.zadn.vn/default",
+        "type": 0,
+        "avatar_25": "https://s160-ava-talk.zadn.vn/default"
+      }
+    ],
+    "updateInfo": null
+  },
+  "updateMemberIds": [
+    "1258063758797981322"
+  ],
+  "act": "join",
+  "subType": null,
+  "msgText": null
+}

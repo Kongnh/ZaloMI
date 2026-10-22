@@ -1,0 +1,33 @@
+{
+  "msgId": "8372420766850",
+  "cliMsgId": "1791950497397",
+  "msgType": 6,
+  "sendDttm": "1791950498819",
+  "fromUid": "2720773113540592957",
+  "dName": "Người D",
+  "message": {
+    "title": "The Business Times (Singapore) ngày 28/9 có bài phân tích về làn sóng đầu tư trung tâm dữ liệu tại Việt Nam. https://www.businesstimes.com.sg/international/asean/vietnams-data-centre-investment-rush-faces-reality-check-power-and-site-constraints",
+    "description": "Tariff disputes, looming electricity shortfalls and tighter site economics are narrowing the investable pipeline Read more at The Business Times.",
+    "href": "https://www.businesstimes.com.sg/international/asean/vietnams-data-centre-investment-rush-faces-reality-check-power-and-site-constraints",
+    "thumb": "https://photo-stal-20.zdn.vn/gr/219e497fbd476d193456/2HGb6FGYHGvcYD4zU9qEPBfTsqO7rr3Ne75U.jpg",
+    "childnumber": 0,
+    "action": "recommened.link",
+    "params": "{\"streamUrl\":\"\",\"mediaTitle\":\"Vietnam\\u2019s data-centre investment rush faces reality check on power and site\\u2026\",\"stream_icon\":\"\",\"tType\":1,\"src\":\"www.businesstimes.com.sg\",\"artist\":\"\",\"tHeight\":630,\"type\":0,\"tWidth\":1200}",
+    "type": ""
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

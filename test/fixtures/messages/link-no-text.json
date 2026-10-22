@@ -1,0 +1,33 @@
+{
+  "msgId": "8303921449116",
+  "cliMsgId": "1790328455723",
+  "msgType": 6,
+  "sendDttm": "1790328457248",
+  "fromUid": "2720773113540592957",
+  "dName": "Người D",
+  "message": {
+    "title": "",
+    "description": "The region needs a practical stocktake that reflects today’s demand, energy security risks and investment bottlenecks Read more at The Business Times.",
+    "href": "https://www.businesstimes.com.sg/events-awards/sustainability-impact-awards-2026/aseans-energy-transition-must-move-ambition-delivery",
+    "thumb": "https://photo-stal-9.zdn.vn/gr/d5015b547395accbf584/2HGb6FCl5eEGOLZIh4zvsoQg5WD13bEATXqi.jpg",
+    "childnumber": 0,
+    "action": "recommened.link",
+    "params": "{\"streamUrl\":\"\",\"mediaTitle\":\"Asean\\u2019s energy transition must move from ambition to delivery\",\"stream_icon\":\"\",\"tType\":1,\"src\":\"www.businesstimes.com.sg\",\"artist\":\"\",\"tHeight\":630,\"type\":0,\"tWidth\":1200}",
+    "type": ""
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

@@ -158,10 +158,10 @@ db.Core.Message.getAll(
 
 ### 6.6 Ảnh có chữ
 
-Cong muốn giữ **mọi ảnh có chữ**, không chỉ ảnh chụp màn hình: poster hội thảo, ảnh chụp văn bản hoặc bảng giá, infographic, slide. Ảnh không có chữ thì bỏ. **[Cong quyết]**
+~~Cong muốn giữ mọi ảnh có chữ.~~ **Sửa ngày 2026-10-22: chỉ quét chữ ảnh có khung hình ảnh chụp màn hình** (`phone_screenshot`, `desktop_screenshot`). Ảnh chụp, ảnh AI, ảnh quảng cáo không có giá trị. Cong chấp nhận mất cả poster, bảng giá, screenshot đã cắt có dáng `photo`, vì quét toàn bộ (~1 ảnh/giây, hàng giờ tồn đọng) không đáng công. 2.189 ảnh `photo` đã quét trước đó bị xoá file nhưng giữ `ocr_text` (`status = text_only`), qua `zmi images --prune-photos`. **[Cong quyết]**
 
 - Với mỗi tin ảnh, ghi một dòng vào bảng `images`: kích thước, chú thích, link, đường dẫn cache, `shape_class`, `text_score`, `ocr_text`, `has_text`, `status`.
-- **Quét chữ trên tất cả ảnh** của các nhóm theo dõi, không chỉ ảnh có dáng ảnh chụp màn hình. Phần này chạy thành một bước riêng, `zmi images`, sau `sync`:
+- **Quét chữ chỉ trên ảnh có dáng ảnh chụp màn hình** của các nhóm theo dõi. Phần này là lệnh `zmi images`, và `zmi sync` gọi nó ở cuối để screenshot mới được quét trước khi link hết hạn (~15 ngày):
   - Chạy tăng dần: chỉ quét ảnh chưa quét. Có giới hạn số ảnh mỗi lần chạy để lần đồng bộ đầu không treo máy.
   - Ảnh có đủ chữ thì `has_text = 1`. Lưu `ocr_text` để tìm toàn văn được (đưa vào FTS) và để skill biết nên mở ảnh nào.
   - Ảnh nguồn lấy theo thứ tự: file cache của Zalo, rồi `hdUrl`. Ảnh cũ không còn trong cache và link đã hỏng thì `status = unavailable`.

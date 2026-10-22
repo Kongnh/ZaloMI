@@ -1,0 +1,40 @@
+{
+  "msgId": "7760470132050",
+  "cliMsgId": "1777041121873",
+  "msgType": 2,
+  "sendDttm": "1777041122375",
+  "fromUid": "505116342737119229",
+  "dName": "Người E",
+  "message": {
+    "title": "",
+    "description": "",
+    "childnumber": 0,
+    "action": "",
+    "params": "{\"width\":651,\"height\":975,\"is_group_layout\":0,\"contentId\":\"\",\"convertible\":\"jxl\",\"is_original\":0}",
+    "type": "",
+    "thumbUrl": "https://photo-stal-11.zdn.vn/gr/jxl/d8a521059121507f0930/3275508899542451041.jxl?jxlstatus=1",
+    "oriUrl": "https://photo-stal-11.zdn.vn/gr/jxl/d8a521059121507f0930/3275508899542451041.jxl?jxlstatus=1",
+    "normalUrl": "https://photo-stal-11.zdn.vn/gr/jxl/d8a521059121507f0930/3275508899542451041.jxl?jxlstatus=1"
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": {
+    "color": -1,
+    "size": -1,
+    "type": 1,
+    "subType": 0,
+    "ext": "{\"sSrcType\":-1,\"sSrcStr\":\"\",\"msg_warning_type\":0}"
+  },
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

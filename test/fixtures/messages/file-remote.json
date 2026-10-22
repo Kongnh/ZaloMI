@@ -1,0 +1,35 @@
+{
+  "msgId": "8253429732702",
+  "cliMsgId": "1789144999285",
+  "msgType": 19,
+  "sendDttm": "1789145000010",
+  "fromUid": "1469187981139662236",
+  "dName": "Người J",
+  "message": {
+    "title": "1-BC-BCT-2026-760.pdf",
+    "description": "",
+    "href": "https://file-stal-11.dlfl.vn/gr/e70ffdb9ecc4319a68d5/2aOboQxskbuFc2JKWGLrv8HoSWjCicA61wgiNZ2m",
+    "thumb": "https://photo-stal-27.zdn.vn/gr/f9d562ba12c7cf9996d6/2aOboQxspTZODJHtkxdQdNqmV6gpryrqJuhZuxpg.jpg",
+    "childnumber": 0,
+    "action": "",
+    "params": "{\"fileSize\":\"3879483\", \"checksum\":\"e123db6f49b527822b2c74f0dafe1373\", \"checksumSha\":\"null\", \"fileExt\":\"pdf\", \"tWidth\":1170, \"tHeight\":435, \"fdata\":\"\", \"fType\":1}",
+    "type": ""
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": "",
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": {
+    "bigRes": true
+  },
+  "properties": null,
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

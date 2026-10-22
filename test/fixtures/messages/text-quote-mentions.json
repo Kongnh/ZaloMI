@@ -1,0 +1,41 @@
+{
+  "msgId": "6663878295620",
+  "cliMsgId": "1748848883227",
+  "msgType": 1,
+  "sendDttm": "1748848883363",
+  "fromUid": "7638779043485403901",
+  "dName": "Người C",
+  "message": "@Người B có a",
+  "quote": {
+    "ownerId": "7886905876230323340",
+    "cliMsgId": 1748848871174,
+    "globalMsgId": 6663877587183,
+    "cliMsgType": 1,
+    "ts": 1748848871901,
+    "msg": "@Người C dự án có ở Đồng Nai ko anh ?",
+    "attach": "{\"mentions\":[{\"uid\":\"7638779043485403901\",\"len\":8,\"pos\":0,\"type\":0}]}",
+    "fromD": "Người B",
+    "ttl": 0
+  },
+  "mentions": [
+    {
+      "uid": "7886905876230323340",
+      "pos": 0,
+      "len": 8,
+      "type": 0
+    }
+  ],
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": null,
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}

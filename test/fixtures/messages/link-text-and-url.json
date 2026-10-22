@@ -1,0 +1,39 @@
+{
+  "msgId": "7557079303708",
+  "cliMsgId": "1771846272202",
+  "msgType": 6,
+  "sendDttm": "1771846272253",
+  "fromUid": "2618316049064218793",
+  "dName": "Người G",
+  "message": {
+    "title": "Chi tiết: https://cafebiz.vn/xe-xang-hoi-sinh-ruc-ro-cuoc-thao-chay-hang-loat-cua-cac-dai-gia-o-to-khoi-giac-mo-ev-sau-khi-dot-50-ty-usd-176260223163918455.chn",
+    "description": "Hết thời \"đốt tiền\" cho xe điện: Vì sao xe xăng vẫn là \"chân ái\" của người tiêu dùng thực dụng?",
+    "href": "https://cafebiz.vn/xe-xang-hoi-sinh-ruc-ro-cuoc-thao-chay-hang-loat-cua-cac-dai-gia-o-to-khoi-giac-mo-ev-sau-khi-dot-50-ty-usd-176260223163918455.chn",
+    "thumb": "",
+    "childnumber": 0,
+    "action": "recommened.link",
+    "params": "{\"tWidth\":0,\"thumb_src_type\":1,\"src\":\"cafebiz.vn\",\"tHeight\":0,\"tType\":2,\"linkType\":0,\"type\":0,\"expired_time\":0,\"icon\":\"https:\\/\\/cafebiz.cafebizcdn.vn\\/web_images\\/cafeBiz96.png\",\"mediaTitle\":\"Xe xăng hồi sinh rực rỡ: Cuộc tháo chạy hàng loạt của các đại gia ô tô khỏi giấc...\"}",
+    "type": ""
+  },
+  "quote": null,
+  "mentions": null,
+  "localPath": null,
+  "folderPath": null,
+  "fileSize": null,
+  "width": null,
+  "height": null,
+  "dimension": null,
+  "properties": {
+    "color": -1,
+    "size": -1,
+    "type": 1,
+    "subType": 0,
+    "ext": "{\"shouldParseLinkOrContact\":0}"
+  },
+  "action": null,
+  "eventInfo": null,
+  "updateMemberIds": null,
+  "act": null,
+  "subType": null,
+  "msgText": null
+}
