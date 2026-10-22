@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // zmi: reads Zalo group messages from the running Zalo PC app into a private DB for market-intelligence reports.
-// Commands so far: doctor, groups.
+// Commands so far: doctor, groups, sync.
 
 import './lib/suppress-sqlite-warning.mjs'; // before anything loads node:sqlite (see the dynamic import of lib/db.mjs below)
 import { parseArgs } from 'node:util';
@@ -11,6 +11,7 @@ import { CdpError } from './lib/cdp.mjs';
 import {
   GroupsConfigError, mergeGroups, readGroupsConfig, writeGroupsConfig, saveGroupsToDb, readMemberCounts, formatGroupsTable,
 } from './lib/groups.mjs';
+import { syncAll, resolveTargets, storedCount, formatGroupLine, formatErrorLines, formatTotalLine, SyncUsageError } from './lib/sync.mjs';
 
 // Dynamic on purpose. ESM loads a static `node:sqlite` import before any module body runs, so its ExperimentalWarning
 // would fire before the filter in suppress-sqlite-warning.mjs exists. Loaded here, the filter is already in place.
@@ -26,9 +27,12 @@ const USAGE = `Cách dùng: node zmi.mjs <lệnh> [tùy chọn]
 Lệnh:
   doctor      Kiểm tra: cổng debug của Zalo, module database, đọc thử 1 tin, quyền ghi thư mục data/
   groups      Hiện danh sách nhóm và nhóm nào đang theo dõi (đọc từ config/groups.json, không cần mở Zalo)
+  sync        Đọc tin của các nhóm đang theo dõi từ Zalo (chỉ đọc) vào data/zalo-mi.db: lần đầu lấy hết lịch sử, các lần sau chỉ lấy tin mới
 
 Tùy chọn:
   --refresh   Với "groups": đọc lại danh sách nhóm từ Zalo (chỉ đọc), cập nhật database và config/groups.json
+  --full      Với "sync": đọc lại toàn bộ lịch sử của mỗi nhóm thay vì chỉ tin mới
+  --groups A,B  Với "sync": chỉ đồng bộ các nhóm này (convId cách nhau bằng dấu phẩy) thay vì mọi nhóm đang theo dõi
   --port N    Cổng debug của Zalo (mặc định ${DEFAULT_PORT})
   -h, --help  Hiện hướng dẫn này
 `;
@@ -220,10 +224,72 @@ export async function groupsCommand({ refresh = false, port, open = openBridge, 
   return 0;
 }
 
+/**
+ * zmi sync [--full] [--groups a,b]. Reads the tracked groups (config/groups.json) from Zalo, read-only, into the database.
+ * Zalo is opened first and the database only after that succeeds, so a closed Zalo leaves data/ untouched.
+ * `open`, `configPath` and `dbPath` are injectable so this can run against a fake Zalo and a scratch directory.
+ * Exit code: 0 done, 1 something to fix first or a group failed, 2 bad --groups.
+ */
+export async function syncCommand({ full = false, groups: requested, port, open = openBridge, configPath = GROUPS_CONFIG_PATH, dbPath = DB_PATH }) {
+  let config;
+  try {
+    config = readGroupsConfig(configPath);
+  } catch (error) {
+    if (error instanceof GroupsConfigError) { console.error(error.message); return 1; }
+    throw error;
+  }
+  if (!config) {
+    console.error('Chưa có danh sách nhóm (config/groups.json). Hãy mở Zalo ở chế độ thu thập rồi chạy: node zmi.mjs groups --refresh');
+    return 1;
+  }
+
+  let requestedIds = [];
+  if (requested !== undefined) {
+    requestedIds = String(requested).split(',').map(id => id.trim()).filter(Boolean);
+    if (requestedIds.length === 0) { console.error('--groups cần ít nhất một convId (cách nhau bằng dấu phẩy).'); return 2; }
+  }
+  let targets;
+  try {
+    targets = resolveTargets(config, requestedIds);
+  } catch (error) {
+    if (error instanceof SyncUsageError) { console.error(error.message); return 2; }
+    throw error;
+  }
+  if (targets.length === 0) {
+    console.error('Chưa có nhóm nào đang theo dõi. Đặt "tracked": true cho nhóm cần theo dõi trong config/groups.json (xem: node zmi.mjs groups).');
+    return 1;
+  }
+
+  let bridge;
+  try {
+    bridge = await open({ port });
+  } catch (error) {
+    return reportOpenFailure(error, port);
+  }
+  let db;
+  try {
+    db = openDb(dbPath);
+    const names = new Map(targets.map(g => [g.convId, g.name]));
+    console.log(`Đang đồng bộ ${targets.length} nhóm (${full ? 'toàn bộ lịch sử' : 'tin mới'}; chỉ đọc từ Zalo)...`);
+    const run = await syncAll(bridge, db, targets.map(g => g.convId), {
+      full,
+      onGroup: result => {
+        console.log(formatGroupLine(result, { name: names.get(result.convId), stored: storedCount(db, result.convId) }));
+        for (const line of formatErrorLines(result)) console.log(line);
+      },
+    });
+    console.log(formatTotalLine(run.totals, { seconds: (run.finishedAt - run.startedAt) / 1000 }));
+    return run.totals.failedGroups > 0 ? 1 : 0;
+  } finally {
+    bridge.close();
+    db?.close();
+  }
+}
+
 async function main(argv) {
   let parsed;
   try {
-    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, refresh: { type: 'boolean' }, help: { type: 'boolean', short: 'h' } } });
+    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, refresh: { type: 'boolean' }, full: { type: 'boolean' }, groups: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
   } catch (error) {
     console.error(`${error.message}\n\n${USAGE}`);
     return 2;
@@ -233,6 +299,11 @@ async function main(argv) {
 
   if (values.refresh && command !== 'groups') {
     console.error(`--refresh chỉ dùng với lệnh groups.\n\n${USAGE}`);
+    return 2;
+  }
+
+  if ((values.full || values.groups !== undefined) && command !== 'sync') {
+    console.error(`--full và --groups chỉ dùng với lệnh sync.\n\n${USAGE}`);
     return 2;
   }
 
@@ -247,6 +318,8 @@ async function main(argv) {
       return doctor({ port });
     case 'groups':
       return groupsCommand({ refresh: Boolean(values.refresh), port });
+    case 'sync':
+      return syncCommand({ full: Boolean(values.full), groups: values.groups, port });
     default:
       console.error(`${command ? `Lệnh không biết: "${command}".` : 'Thiếu lệnh.'}\n\n${USAGE}`);
       return 2;
