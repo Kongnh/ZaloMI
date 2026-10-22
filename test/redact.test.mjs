@@ -30,6 +30,17 @@ test('mobile numbers in the shapes people actually type', () => {
   }
 });
 
+test('double spaces and a spaced hyphen between the groups', () => {
+  for (const phone of ['0963  046  382', '0963 - 046 - 382', '096 - 304 - 6382', '+84  963  046  382', '+84 963 - 046 - 382', '028 - 3822 - 1234']) {
+    assert.equal(redact(phone), PHONE, phone);
+    assert.equal(redact(`ĐT: ${phone}.`), `ĐT: ${PHONE}.`, phone);
+  }
+  // digit groups separated like this that are not a phone shape stay
+  for (const s of ['2026 - 2030 - 2045', '09:30 - 10:30', '05 - 03 - 2026', '10.5 - 20.5 - 30.5']) {
+    assert.equal(redact(s), s, s);
+  }
+});
+
 test('numbers with the country code', () => {
   for (const phone of [
     '+84 963 046 382',
@@ -178,8 +189,23 @@ test('longer digit runs are not cut into a phone number', () => {
   }
 });
 
-test('digits glued to letters are not a phone number', () => {
-  for (const s of ['A0963046382', '0963046382A', 'REF0912345678', '0963046382đ', 'mã_0963046382']) {
+test('a phone number glued to letters is still a phone number', () => {
+  for (const [input, expected] of [
+    ['Zalo0963046382', `Zalo${PHONE}`],
+    ['SĐT0963046382', `SĐT${PHONE}`],
+    ['A0963046382', `A${PHONE}`],
+    ['REF0912345678', `REF${PHONE}`],
+    ['0963046382nhé', `${PHONE}nhé`],
+    ['0963046382ạ', `${PHONE}ạ`],
+    ['0963046382A', `${PHONE}A`],
+    ['gọi0963 046 382ngay', `gọi${PHONE}ngay`],
+  ]) {
+    assert.equal(redact(input), expected, input);
+  }
+});
+
+test('the money suffix đ and a glued underscore keep a digit run as it is', () => {
+  for (const s of ['0963046382đ', '0963046382đồng', '0963046382Đ', 'mã_0963046382', '0963046382_x']) {
     assert.equal(redact(s), s, s);
   }
 });
@@ -189,15 +215,50 @@ test('URLs are left alone, including long digit runs inside them', () => {
     'https://example.com/doc/0963046382123.pdf',
     'https://example.com/doc/0963046382.pdf',
     'xem http://x.vn/a?id=0912345678&b=2 nhé',
-    'https://zalo.me/0963046382',
     'www.example.com/tin-tuc/0963046382',
     'example.com/files/0963046382.pdf',
-    'https://example.com/?mail=a@b.com',
+    'https://zalo.me/g/abcxyz',
+    'https://zalo.me/g/abcxyz?src=qr',
+    'https://zalo.me/s/12345',
+    'https://zalo.me/0963046382123', // longer than a phone: not cut
+    'https://zalo.me/someshop',
+    'https://wa.me/message/ABCDEF',
+    'notzalo.me/0963046382', // a different domain
   ]) {
     assert.equal(redact(s), s, s);
   }
   assert.equal(redact('Xem https://example.com/a/0963046382123.pdf hoặc gọi 0963046382'), `Xem https://example.com/a/0963046382123.pdf hoặc gọi ${PHONE}`);
   assert.equal(redact('gọi 0963046382 rồi xem www.example.com/a/0912345678'), `gọi ${PHONE} rồi xem www.example.com/a/0912345678`);
+});
+
+test('zalo.me/<phone> and wa.me/<phone> links carry a personal number in the path', () => {
+  for (const [input, expected] of [
+    ['https://zalo.me/0963046382', `https://zalo.me/${PHONE}`],
+    ['zalo.me/84963046382', `zalo.me/${PHONE}`],
+    ['https://zalo.me/+84963046382', `https://zalo.me/${PHONE}`],
+    ['https://zalo.me/02838221234', `https://zalo.me/${PHONE}`],
+    ['https://zalo.me/0963046382?src=qr', `https://zalo.me/${PHONE}?src=qr`],
+    ['https://wa.me/84963046382', `https://wa.me/${PHONE}`],
+    ['https://wa.me/+84963046382?text=hi', `https://wa.me/${PHONE}?text=hi`],
+    ['HTTPS://ZALO.ME/0963046382', `HTTPS://ZALO.ME/${PHONE}`],
+    ['www.zalo.me/0963046382', `www.zalo.me/${PHONE}`],
+    ['Kết bạn Zalo: https://zalo.me/0963046382 nhé', `Kết bạn Zalo: https://zalo.me/${PHONE} nhé`],
+  ]) {
+    assert.equal(redact(input), expected, input);
+  }
+});
+
+test('an e-mail address inside a URL is redacted, the rest of the URL stays', () => {
+  assert.equal(redact('https://example.com/?mail=a@b.com'), `https://example.com/?mail=${EMAIL}`);
+  assert.equal(redact('xem https://example.com/form?to=nam.tran@evn.vn&x=1 nhé'), `xem https://example.com/form?to=${EMAIL}&x=1 nhé`);
+  assert.equal(redact('mailto:nam.tran@evn.vn'), `mailto:${EMAIL}`);
+});
+
+test('retina asset names (logo@2x.png) are not e-mail addresses', () => {
+  for (const s of ['https://cdn.example.com/img/logo@2x.png', 'logo@2x.png', 'icon@3x.JPG và bg@2x.webp', 'https://x.vn/a/b@2x.pdf?v=1']) {
+    assert.equal(redact(s), s, s);
+  }
+  assert.equal(redact('gửi a@sub.png.com nhé'), `gửi ${EMAIL} nhé`);
 });
 
 test('text without any personal data comes back identical', () => {
@@ -222,9 +283,9 @@ test('any other non-string input is a programming error', () => {
 });
 
 test('redacting twice gives the same result as redacting once', () => {
-  const s = 'Liên hệ 0963 046 382, +84 988 123 456, thuduyen.vcci@gmail.com, 028 3822 1234 hoặc https://example.com/0963046382123.pdf';
+  const s = 'Liên hệ 0963 046 382, +84 988 123 456, thuduyen.vcci@gmail.com, 028 3822 1234, https://zalo.me/0912345678 hoặc https://example.com/0963046382123.pdf?to=a@b.vn';
   const once = redact(s);
-  assert.equal(once, `Liên hệ ${PHONE}, ${PHONE}, ${EMAIL}, ${PHONE} hoặc https://example.com/0963046382123.pdf`);
+  assert.equal(once, `Liên hệ ${PHONE}, ${PHONE}, ${EMAIL}, ${PHONE}, https://zalo.me/${PHONE} hoặc https://example.com/0963046382123.pdf?to=${EMAIL}`);
   assert.equal(redact(once), once);
 });
 
@@ -239,4 +300,27 @@ test('a long chat export is handled in linear time', () => {
   const out = redact(big);
   assert.ok(out.endsWith(`Liên hệ ${PHONE}`));
   assert.ok(Date.now() - started < 5000, 'redact should stay fast on ~2 MB of text');
+});
+
+test('adversarial inputs do not blow up (no catastrophic backtracking)', () => {
+  const N = 100000;
+  for (const [name, input] of [
+    ['run of "0 "', '0 '.repeat(N)],
+    ['run of "x@"', 'x@'.repeat(N)],
+    ['"x@" then a long dotted chain with no TLD', 'x@' + 'a.'.repeat(N)],
+    ['long local part without "@"', 'a.'.repeat(N) + 'b'],
+    ['long dotted host before "/"', 'aa.'.repeat(N)],
+    ['one very long digit run', '09'.repeat(N)],
+    ['phone-looking groups repeated', '0963 '.repeat(N)],
+    ['+84 followed by many spaces', '+84' + ' '.repeat(N) + '963'],
+    ['long hyphen/space separator mix', '0963' + ' - '.repeat(N)],
+    ['zalo.me link with a very long path', 'https://zalo.me/' + '0'.repeat(N)],
+  ]) {
+    const started = Date.now();
+    redact(input);
+    assert.ok(Date.now() - started < 3000, `${name} took ${Date.now() - started} ms`);
+  }
+  // the pathological shapes still come back correct
+  assert.equal(redact('x@' + 'a.'.repeat(1000)), 'x@' + 'a.'.repeat(1000));
+  assert.equal(redact('0 '.repeat(1000) + '0963046382'), '0 '.repeat(1000) + PHONE);
 });
