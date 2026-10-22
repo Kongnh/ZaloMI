@@ -174,10 +174,17 @@ test('service hotlines (start with 1, not 0 or +84) are organisation numbers and
   }
 });
 
+test('mistyped mobiles (one digit short or long) are still phone numbers', () => {
+  // seen in real exports: people drop or double a digit, and the reader can still guess the number
+  for (const phone of ['098177774', '09023536000', '09630463821', '0867 224 4149', '0867.224.4149']) {
+    assert.equal(redact(phone), PHONE, phone);
+    assert.equal(redact(`liên hệ tôi sđt ${phone} nhé`), `liên hệ tôi sđt ${PHONE} nhé`, phone);
+  }
+});
+
 test('longer digit runs are not cut into a phone number', () => {
   for (const s of [
     '1498602681856850483', // Zalo id
-    '09630463821', // 11 digits starting 09
     '096304638212',
     '079123456789', // 12-digit citizen id
     '0312345678-001', // tax code with a branch suffix

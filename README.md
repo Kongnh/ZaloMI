@@ -2,12 +2,31 @@
 
 Công cụ dòng lệnh `zmi` (Node 24) đọc tin nhắn nhóm Zalo từ ứng dụng Zalo PC đang chạy, qua Chrome DevTools Protocol, để đưa vào một database SQLite riêng phục vụ báo cáo market intelligence theo yêu cầu. Thiết kế đầy đủ: `Thiết kế hệ thống Zalo MI.md`. Kết quả thử nghiệm đọc dữ liệu: `Kết quả thử nghiệm đọc dữ liệu Zalo PC.md`.
 
-Hiện có: kết nối CDP, cầu nối chỉ đọc, các lệnh `doctor`, `groups`, `sync` (lấy tin của các nhóm theo dõi vào database), `files` (lưu file đính kèm vào `data/files/`) và `images` (quét chữ trong ảnh chụp màn hình, lưu ảnh có chữ vào `data/images/`). Chưa có `export` và `search`.
+Hiện có: kết nối CDP, cầu nối chỉ đọc, các lệnh `doctor`, `groups`, `sync` (lấy tin của các nhóm theo dõi vào database), `files` (lưu file đính kèm vào `data/files/`), `images` (quét chữ trong ảnh chụp màn hình, lưu ảnh có chữ vào `data/images/`), `export` (bản đã lọc, đã che cho Claude đọc), `search` (tìm toàn văn), và script mở Zalo ở chế độ thu thập.
 
 ## Yêu cầu
 
 - Windows, Node 24 trở lên.
-- Zalo PC đang mở **kèm cờ** `--remote-debugging-port=9222` (lối tắt "Zalo (MI)"). Phải thoát hẳn Zalo trước khi mở lại, nếu không Zalo đang chạy sẽ bỏ qua cờ này. Cổng chỉ mở ở `127.0.0.1`.
+- Zalo PC đang mở **kèm cờ** `--remote-debugging-port=9222` (lối tắt "Zalo (MI)", xem bên dưới). Phải thoát hẳn Zalo trước khi mở lại, nếu không Zalo đang chạy sẽ bỏ qua cờ này. Cổng chỉ mở ở `127.0.0.1`. Chỉ `doctor`, `groups --refresh`, `sync` và `images` cần Zalo mở; `files`, `export`, `search` thì không.
+
+## Mở Zalo ở chế độ thu thập
+
+```
+powershell -ExecutionPolicy Bypass -File scripts\zalo-mi-launch.ps1            # hoặc bấm lối tắt "Zalo (MI)" trên Desktop
+powershell -ExecutionPolicy Bypass -File scripts\zalo-mi-launch.ps1 -DryRun    # chỉ in Zalo.exe, lệnh sẽ chạy và trạng thái
+```
+
+Script tìm thư mục `Zalo-<phiên bản>` mới nhất trong `%LOCALAPPDATA%\Programs\Zalo\`, rồi:
+
+1. Zalo đang chạy và cổng debug trả lời: báo sẵn sàng (mã 0).
+2. Zalo đang chạy **không** có cổng debug: in hướng dẫn thoát hẳn Zalo (khay hệ thống → Thoát) rồi chạy lại (mã 2). Script **không bao giờ** tự tắt Zalo.
+3. Zalo chưa chạy: mở `Zalo.exe --remote-debugging-port=9222 --remote-allow-origins=http://127.0.0.1:9222`, chờ cổng mở tối đa 60 giây (mã 0; hết giờ: 3).
+
+Mã khác: 4 không tìm thấy `Zalo.exe`, 5 cổng mở nhưng chưa có cửa sổ "Zalo" (đợi Zalo đăng nhập xong rồi chạy lại), 1 lỗi bất ngờ. Lần chạy thật đầu tiên tạo lối tắt "Zalo (MI)" trên Desktop (không ghi đè lối tắt đã có; `-NoShortcut` để bỏ). Lối tắt gọi chính script này nên vẫn đúng khi Zalo cập nhật sang thư mục phiên bản mới. `-Port N` đổi cổng.
+
+Kiểm tra tay sau khi sửa script: (a) thoát hẳn Zalo, chạy script → Zalo mở, cổng trả lời; (b) `node zmi.mjs doctor` ✓ mọi mục; (c) chạy lại script khi Zalo (MI) đang mở → báo sẵn sàng, không mở Zalo thứ hai; (d) mở Zalo bình thường rồi chạy script → hướng dẫn thoát, mã 2; (e) `-DryRun` không mở gì.
+
+Lưu ý: khi cổng mở, mọi chương trình trên máy này đều đọc được Zalo qua `127.0.0.1:9222`. Thoát Zalo (MI) và mở Zalo bình thường khi không cần thu thập.
 
 ## Lệnh
 
@@ -99,6 +118,35 @@ Mỗi ảnh chụp màn hình được xử lý như sau:
 - Đồng thời 3 ảnh. Bảo vệ ổ đĩa như `files`: ổ chứa `data/` còn dưới 5 GB thì dừng, ảnh còn lại giữ nguyên, thoát mã 1. Mất kết nối với Zalo giữa chừng, hoặc 10 ảnh chưa từng lỗi bị lỗi liên tiếp (dấu hiệu OCR hay bộ giải mã hỏng), thì dừng và báo; chạy lại là tiếp tục. Ảnh đã lỗi từ trước không tính vào ngưỡng này và luôn xếp sau, nên vài ảnh lỗi mãi không chặn được hàng đợi.
 - In tiến độ mỗi 25 ảnh, rồi `Đã quét X ảnh: Y có chữ (đã lưu), Z không có chữ, W không còn tải được, V lỗi`, thời gian và tốc độ (ảnh/giây), các lý do lỗi phổ biến nhất, và dòng trạng thái của các ảnh chụp màn hình (kèm số ảnh dáng khác không quét theo thiết kế).
 
+```
+node zmi.mjs export                                        # 14 ngày gần nhất, mọi nhóm đang theo dõi
+node zmi.mjs export --from 2026-10-01 --to 2026-10-15      # ngày giờ Việt Nam; --to tính hết ngày đó
+node zmi.mjs export --groups g123,g456 --out D:\tam\xuat   # chỉ các nhóm này; --out phải chưa có hoặc đang trống
+```
+
+`export` đọc database (không cần Zalo) và ghi một thư mục `exports/<YYYYMMDD-HHmm>/` (trùng phút thì thêm `-2`, `-3`…). **Dòng cuối cùng in ra là đường dẫn thư mục**, để skill lấy. Nếu lần sync gần nhất cũ hơn 24 giờ, cảnh báo được in trước dòng đó và ghi ở đầu `index.md`. Mã thoát: 0 xong, 1 chưa có database / chưa có nhóm theo dõi / `config/groups.json` hỏng, 2 sai `--from`, `--to`, `--groups` hay `--out`.
+
+| File | Nội dung |
+| --- | --- |
+| `index.md` | Kỳ, lần sync gần nhất, bảng nhóm (số tin, tin đầu, tin cuối, tên file), số người mới, file, ảnh có chữ, link, cách đọc và những gì đã lọc bỏ |
+| `<tên-nhóm>.md` | Một file cho mỗi nhóm có tin, gom theo ngày: `[HH:mm] Người gửi: nội dung #m<mã tin>` |
+| `members.md` | Người vào nhóm trong kỳ (tự tham gia hay được ai thêm), kèm tối đa 2 tin đầu của chính họ sau khi vào |
+| `attachments.md` | Theo nhóm: file, ảnh chụp màn hình có chữ (có file trong `data/images/`) và link của kỳ |
+
+Dạng dòng: `[File] tên (3,9 MB) → <đường dẫn tuyệt đối>` hoặc `→ chỉ có link: <href>`; `[Ảnh có chữ] chú thích | ~200 ký tự đầu của chữ OCR → <đường dẫn>` (ảnh đã xóa bằng `--prune-photos` ghi `(chỉ còn chữ, ảnh đã xoá)`); `[Ảnh] chú thích`; `[Link] tiêu đề — tên miền | mô tả`; `[Thành viên] X được Y thêm vào nhóm`. Một tin dài vẫn nằm trên một dòng (xuống dòng thành ` ⏎ `). Giờ luôn là giờ Việt Nam (UTC+7), bất kể múi giờ của máy.
+
+- **Lọc bỏ**: tin thu hồi, tin đã xóa, sticker, video (database vẫn giữ), tin trống, và tin chào/cảm ơn ngắn (dưới 15 ký tự, không có số hay link, chỉ gồm lời chào/cảm ơn cộng tối đa một từ khác như tên người). Link, file và ảnh không bao giờ bị lọc.
+- **Rút gọn tin đăng lại**: tin từ 40 ký tự trở lên giống hệt một tin trước đó **trong cùng nhóm và cùng kỳ** chỉ còn `(đăng lại tin #m<tin gốc>)`, vẫn giữ giờ, người gửi và mã của chính nó. Các nhóm bán hàng đăng lại cùng một tin mỗi ngày: lần xuất 14 ngày đầu tiên rút gọn 1.732 tin, file nhóm lớn nhất giảm từ 1,6 MB còn 1,0 MB. Tin giống nhau ở **hai nhóm khác nhau** được giữ nguyên để bản tin tự gộp.
+- **Che dữ liệu cá nhân** (`lib/redact.mjs`, spec 6.7): chữ chat, tiêu đề/mô tả link, tên người gửi và link file đi qua `redact`: số điện thoại thành `[SĐT]`, email thành `[email]`. Chữ OCR trong ảnh và tên file thì không che (Cong quyết: ảnh, PDF không cần che; bản tin vẫn không được ghi số cá nhân). Số di động 10 số theo các cách nhóm thường gặp, số gõ thừa hoặc thiếu một chữ số (`098177774`, `0867 224 4149`), số bàn `02x`, số có `+84`/`0084`, và `zalo.me/<số>` đều bị che; mã văn bản, công suất, tiền, ngày giờ, hotline `1900`/`1800`, số căn cước 12 số thì không. Điểm mù đã biết: mã số thuế 10 số bắt đầu bằng 03/05/07/08/09 bị che như số di động.
+
+```
+node zmi.mjs search "DPPA"                                  # mới nhất trước, tối đa 50 kết quả
+node zmi.mjs search "giá tấm pin" --from 2026-10-01 --limit 20
+node zmi.mjs search "hội thảo" --groups g123
+```
+
+`search` tìm toàn văn trong chữ tin, tiêu đề/mô tả link, tên file và chữ OCR của ảnh, không phân biệt hoa thường và dấu (`dien` khớp `điện`). Mỗi kết quả một dòng `[YYYY-MM-DD HH:mm] <nhóm> | <người gửi>: <~200 ký tự quanh chỗ khớp, đã che> #m<mã tin>`; tin thu hồi, đã xóa, sticker, video không bao giờ được trả về. Mặc định: mọi ngày, các nhóm đang theo dõi. Không cần Zalo. Mã thoát 0 (cả khi không có kết quả), 1 chưa có database, 2 thiếu từ khóa hay sai tùy chọn. Từ khóa bắt đầu bằng `-` phải đặt sau `--`: `node zmi.mjs search -- "-abc"`.
+
 ## Thử nghiệm ảnh (bước 0 của Task 7)
 
 **Đổi JXL sang JPEG.** Thử theo thứ tự của spec:
@@ -155,7 +203,12 @@ Nhóm `☀️ Future Energy Vietnam 🇻🇳`, giai đoạn 22/09 đến 05/10/2
 
 | File | Vai trò |
 | --- | --- |
-| `zmi.mjs` | Điểm vào CLI, lệnh `doctor`, `groups`, `sync`, `files` và `images` |
+| `zmi.mjs` | Điểm vào CLI, lệnh `doctor`, `groups`, `sync`, `files`, `images`, `export` và `search` |
+| `lib/export.mjs` | `runExport`/`exportRange` (thư mục xuất: lọc nhiễu, rút gọn tin đăng lại, giờ Việt Nam, đường dẫn tuyệt đối), `searchMessages`, `selectGroupIds`, `isNoiseMessage`, `slugify`, đọc ngày `--from`/`--to` |
+| `lib/redact.mjs` | `redact(text)`: che số điện thoại và email trong chữ chat |
+| `lib/db.mjs` | Database riêng: lược đồ, upsert idempotent, tìm toàn văn FTS5 bỏ dấu |
+| `lib/normalize.mjs` | Chuẩn hóa tin thô của Zalo theo `msgType` thành tin, link, file, ảnh, sự kiện thành viên |
+| `scripts/zalo-mi-launch.ps1` | Mở Zalo kèm cổng debug, tạo lối tắt "Zalo (MI)" |
 | `lib/net.mjs` | `guardedFetch` (tải chỉ từ máy chủ công cộng, kiểm địa chỉ lúc kết nối và ở mỗi lần chuyển hướng), `checkRemoteUrl`, `isPrivateAddress`; dùng chung cho `files` và `images` |
 | `lib/images.mjs` | `shapeClass`, `textScore`/`hasText` (quyết định có chữ), `jpegVariantUrl`, `fetchImage` (tải ảnh qua `guardedFetch`, giới hạn thời gian và dung lượng), `scanImages` (phần tồn đọng của ảnh chụp màn hình: cache máy, link, giải mã, OCR, lưu; đồng thời 3 ảnh, bảo vệ ổ đĩa), `prunePhotoImages` (xóa file ảnh dáng `photo`, giữ chữ OCR), in kết quả |
 | `lib/files.mjs` | `resolveFile` (một file: chép từ máy, tải theo link, kiểm tra), `resolveFiles` (phần tồn đọng, đồng thời 3 file, bảo vệ ổ đĩa), `remapLocalPath`, đặt tên file, in kết quả |

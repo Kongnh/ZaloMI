@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // zmi: reads Zalo group messages from the running Zalo PC app into a private DB for market-intelligence reports.
-// Commands so far: doctor, groups, sync, files, images.
+// Commands so far: doctor, groups, sync, files, images, export, search.
 
 import './lib/suppress-sqlite-warning.mjs'; // before anything loads node:sqlite (see the dynamic import of lib/db.mjs below)
 import { parseArgs } from 'node:util';
@@ -14,6 +14,9 @@ import {
 import { syncAll, resolveTargets, storedCount, formatGroupLine, formatErrorLines, formatTotalLine, SyncUsageError } from './lib/sync.mjs';
 import { resolveAndReport, filesStatusLine } from './lib/files.mjs';
 import { scanAndReport, imagesStatusLine, prunePhotoImages, formatPruneReport } from './lib/images.mjs';
+import {
+  ExportError, resolveRange, resolveSearchRange, selectGroupIds, runExport, searchMessages, formatVnDateTime,
+} from './lib/export.mjs';
 
 // Dynamic on purpose. ESM loads a static `node:sqlite` import before any module body runs, so its ExperimentalWarning
 // would fire before the filter in suppress-sqlite-warning.mjs exists. Loaded here, the filter is already in place.
@@ -36,13 +39,18 @@ Lệnh:
   sync        Đọc tin của các nhóm đang theo dõi từ Zalo (chỉ đọc) vào data/zalo-mi.db: lần đầu lấy hết lịch sử, các lần sau chỉ lấy tin mới; cuối cùng lưu file đính kèm mới vào data/files/
   files       Lưu file đính kèm chưa xử lý vào data/files/ (chép từ máy hoặc tải theo link); không cần mở Zalo
   images      Quét chữ trong ảnh chụp màn hình chưa quét (OCR của Zalo, cần mở Zalo); ảnh có chữ được lưu thành JPEG vào data/images/
+  export      Xuất tin của các nhóm theo dõi trong một kỳ ra thư mục exports/<ngày-giờ>/ (đã lọc nhiễu, che số điện thoại và email) cho Claude đọc; không cần mở Zalo; dòng cuối in đường dẫn thư mục xuất
+  search "từ khóa"  Tìm toàn văn (không phân biệt dấu) trong database, mới nhất trước; không cần mở Zalo
 
 Tùy chọn:
   --refresh   Với "groups": đọc lại danh sách nhóm từ Zalo (chỉ đọc), cập nhật database và config/groups.json
   --full      Với "sync": đọc lại toàn bộ lịch sử của mỗi nhóm thay vì chỉ tin mới
-  --groups A,B  Với "sync": chỉ đồng bộ các nhóm này (convId cách nhau bằng dấu phẩy) thay vì mọi nhóm đang theo dõi
+  --groups A,B  Với "sync", "export", "search": chỉ các nhóm này (convId cách nhau bằng dấu phẩy) thay vì mọi nhóm đang theo dõi
+  --from YYYY-MM-DD  Với "export" và "search": từ ngày này (giờ Việt Nam). "export" mặc định 14 ngày gần nhất; "search" mặc định không giới hạn
+  --to YYYY-MM-DD    Với "export" và "search": đến hết ngày này (giờ Việt Nam)
+  --out THƯ_MỤC      Với "export": thư mục xuất (mặc định exports/<YYYYMMDD-HHmm>/; phải chưa có hoặc đang trống)
   --retry     Với "files": thử lại cả file lỗi và file chỉ có link
-  --limit N   Với "files": chỉ xử lý N file (mới nhất trước); với "images": chỉ quét N ảnh (theo thứ tự ưu tiên)
+  --limit N   Với "files": chỉ xử lý N file (mới nhất trước); với "images": chỉ quét N ảnh (theo thứ tự ưu tiên); với "search": tối đa N kết quả (mặc định 50)
   --rescan    Với "images": quét lại mọi ảnh chụp màn hình, kể cả ảnh đã quét
   --prune-photos  Với "images": không quét; xóa file đã lưu của ảnh không phải ảnh chụp màn hình, giữ chữ OCR; không cần mở Zalo
   --port N    Cổng debug của Zalo (mặc định ${DEFAULT_PORT})
@@ -406,15 +414,114 @@ export async function imagesCommand({ limit, rescan = false, prunePhotos = false
   }
 }
 
+/** The convIds in --groups ("a, b"): undefined when the flag is absent, null when it holds no id at all. */
+function parseGroupIds(text) {
+  if (text === undefined) return undefined;
+  const ids = String(text).split(',').map(id => id.trim()).filter(Boolean);
+  return ids.length === 0 ? null : ids;
+}
+
+const NO_GROUP_IDS = '--groups cần ít nhất một convId (cách nhau bằng dấu phẩy).';
+const NO_DATABASE = 'Chưa có database (data/zalo-mi.db). Hãy chạy trước: node zmi.mjs sync';
+
+/** The groups config (null when there is none yet); a broken file is reported and comes back as undefined. */
+function readConfigOrReport(configPath) {
+  try {
+    return readGroupsConfig(configPath);
+  } catch (error) {
+    if (error instanceof GroupsConfigError) { console.error(error.message); return undefined; }
+    throw error;
+  }
+}
+
+/**
+ * zmi export [--from D] [--to D] [--groups a,b] [--out DIR]. Writes exports/<YYYYMMDD-HHmm>/ (index.md, one file per group,
+ * members.md, attachments.md) from the database: filtered, redacted, times in Vietnam time. Reads only; needs no Zalo.
+ * The LAST line printed is the output folder, so a script (the skill) can pick it up; a stale-data warning comes before it.
+ * `configPath`, `dbPath` and `now` are injectable. The repo root (where exports/ goes and stored_path is resolved)
+ * follows from dbPath, like zmi files.
+ * Exit code: 0 done, 1 no database / no tracked group / unreadable config, 2 bad --from/--to/--groups/--out.
+ */
+export async function exportCommand({ from, to, groups: requested, out, configPath = GROUPS_CONFIG_PATH, dbPath = DB_PATH, now = Date.now }) {
+  let range;
+  try {
+    range = resolveRange({ from, to }, now());
+  } catch (error) {
+    if (error instanceof ExportError) { console.error(error.message); return error.exitCode; }
+    throw error;
+  }
+  const requestedIds = parseGroupIds(requested);
+  if (requestedIds === null) { console.error(NO_GROUP_IDS); return 2; }
+  if (!existsSync(dbPath)) { console.error(NO_DATABASE); return 1; }
+  const config = readConfigOrReport(configPath);
+  if (config === undefined) return 1;
+
+  const db = openDb(dbPath);
+  try {
+    const convIds = selectGroupIds({ config, db, requested: requestedIds });
+    const { dir, stats } = runExport(db, { ...range, convIds, out, rootDir: rootDirOf(dbPath), now });
+    const n = value => value.toLocaleString('vi-VN');
+    console.log(`Đã xuất ${n(stats.groups)} nhóm có tin (${n(stats.lines)} dòng) trong kỳ ${formatVnDateTime(range.from)} → ${formatVnDateTime(range.to)} (giờ Việt Nam); ${n(stats.members)} người mới vào nhóm, ${n(stats.attachments.files)} file, ${n(stats.attachments.images)} ảnh có chữ, ${n(stats.attachments.links)} link.`);
+    if (stats.groups === 0) console.log('Không có tin nào trong kỳ này (kiểm tra --from/--to, hoặc chạy: node zmi.mjs sync).');
+    if (stats.syncWarning) console.log(stats.syncWarning);
+    console.log(dir);
+    return 0;
+  } catch (error) {
+    if (error instanceof ExportError) { console.error(error.message); return error.exitCode; }
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * zmi search "từ khóa" [--from D] [--to D] [--groups a,b] [--limit N]. Full-text search (case- and accent-insensitive, d = đ)
+ * over message text, link title/description, file names and image OCR text, newest first, one line per hit:
+ * `[YYYY-MM-DD HH:mm] <nhóm> | <người gửi>: <chữ đã che, ~200 ký tự> #m<mã tin>`. Recalled, deleted, sticker and video
+ * messages are not found. Default: every date, the tracked groups, 50 hits. Reads only; needs no Zalo.
+ * Exit code: 0 done (also when nothing matched), 1 no database / no tracked group, 2 missing keyword or bad --from/--to/--groups.
+ */
+export async function searchCommand({ query, from, to, groups: requested, limit = 50, configPath = GROUPS_CONFIG_PATH, dbPath = DB_PATH }) {
+  const keyword = String(query ?? '').trim();
+  if (keyword === '') { console.error('Thiếu từ khóa tìm. Ví dụ: node zmi.mjs search "DPPA"'); return 2; }
+  let range;
+  try {
+    range = resolveSearchRange({ from, to });
+  } catch (error) {
+    if (error instanceof ExportError) { console.error(error.message); return error.exitCode; }
+    throw error;
+  }
+  const requestedIds = parseGroupIds(requested);
+  if (requestedIds === null) { console.error(NO_GROUP_IDS); return 2; }
+  if (!existsSync(dbPath)) { console.error(NO_DATABASE); return 1; }
+  const config = readConfigOrReport(configPath);
+  if (config === undefined) return 1;
+
+  const db = openDb(dbPath);
+  try {
+    const convIds = selectGroupIds({ config, db, requested: requestedIds });
+    const { lines, total } = searchMessages(db, keyword, { ...range, convIds, limit });
+    if (total === 0) { console.log(`Không tìm thấy tin nào khớp "${keyword}".`); return 0; }
+    for (const line of lines) console.log(line);
+    if (total > lines.length) console.log(`(Hiện ${lines.length}/${total} kết quả, mới nhất trước; thêm --limit N để xem nhiều hơn.)`);
+    return 0;
+  } catch (error) {
+    if (error instanceof ExportError) { console.error(error.message); return error.exitCode; }
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+
 async function main(argv) {
   let parsed;
   try {
-    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, refresh: { type: 'boolean' }, full: { type: 'boolean' }, groups: { type: 'string' }, retry: { type: 'boolean' }, rescan: { type: 'boolean' }, 'prune-photos': { type: 'boolean' }, limit: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
+    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, refresh: { type: 'boolean' }, full: { type: 'boolean' }, groups: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, out: { type: 'string' }, retry: { type: 'boolean' }, rescan: { type: 'boolean' }, 'prune-photos': { type: 'boolean' }, limit: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
   } catch (error) {
     console.error(`${error.message}\n\n${USAGE}`);
     return 2;
   }
-  const { values, positionals: [command] } = parsed;
+  const { values, positionals: [command, ...rest] } = parsed;
   if (values.help) { console.log(USAGE); return 0; }
 
   if (values.refresh && command !== 'groups') {
@@ -422,8 +529,20 @@ async function main(argv) {
     return 2;
   }
 
-  if ((values.full || values.groups !== undefined) && command !== 'sync') {
-    console.error(`--full và --groups chỉ dùng với lệnh sync.\n\n${USAGE}`);
+  if (values.full && command !== 'sync') {
+    console.error(`--full chỉ dùng với lệnh sync.\n\n${USAGE}`);
+    return 2;
+  }
+  if (values.groups !== undefined && command !== 'sync' && command !== 'export' && command !== 'search') {
+    console.error(`--groups chỉ dùng với lệnh sync, export và search.\n\n${USAGE}`);
+    return 2;
+  }
+  if ((values.from !== undefined || values.to !== undefined) && command !== 'export' && command !== 'search') {
+    console.error(`--from và --to chỉ dùng với lệnh export và search.\n\n${USAGE}`);
+    return 2;
+  }
+  if (values.out !== undefined && command !== 'export') {
+    console.error(`--out chỉ dùng với lệnh export.\n\n${USAGE}`);
     return 2;
   }
 
@@ -435,8 +554,8 @@ async function main(argv) {
     console.error(`--rescan chỉ dùng với lệnh images.\n\n${USAGE}`);
     return 2;
   }
-  if (values.limit !== undefined && command !== 'files' && command !== 'images') {
-    console.error(`--limit chỉ dùng với lệnh files và images.\n\n${USAGE}`);
+  if (values.limit !== undefined && command !== 'files' && command !== 'images' && command !== 'search') {
+    console.error(`--limit chỉ dùng với lệnh files, images và search.\n\n${USAGE}`);
     return 2;
   }
   if (values['prune-photos'] && (command !== 'images' || values.rescan || values.limit !== undefined)) {
@@ -469,6 +588,10 @@ async function main(argv) {
       return filesCommand({ retry: Boolean(values.retry), limit, port });
     case 'images':
       return imagesCommand({ rescan: Boolean(values.rescan), prunePhotos: Boolean(values['prune-photos']), limit, port });
+    case 'export':
+      return exportCommand({ from: values.from, to: values.to, groups: values.groups, out: values.out });
+    case 'search':
+      return searchCommand({ query: rest.join(' '), from: values.from, to: values.to, groups: values.groups, limit });
     default:
       console.error(`${command ? `Lệnh không biết: "${command}".` : 'Thiếu lệnh.'}\n\n${USAGE}`);
       return 2;
