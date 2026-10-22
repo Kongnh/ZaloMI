@@ -35,6 +35,8 @@ test('readOnlyGuard rejects every other store method and malformed names', () =>
 // ---------------------------------------------------------------------------
 
 const CONV = 'g1000000000000000001';
+// Observed live: Zalo's getAll never returns more than this many rows, whatever `limit` is asked.
+const ENGINE_CAP = 10000;
 const WRITE_METHODS = ['insert', 'put', 'update', 'delete', 'remove', 'findAndDelete', 'getAndUpdate', 'insertMulti', 'updateMulti', 'deleteMulti', 'clear'];
 
 // Compares index keys the way the real engine does for our fixtures (all strings of comparable shape).
@@ -53,15 +55,15 @@ function makeIndexedStore({ rows, keyOf, indexName, log, storeName, requireParti
   const store = {
     async getAll(range, opts = {}) {
       log.push({ store: storeName, method: 'getAll', range: plain(range), opts: plain(opts) });
-      if (range === undefined) return rows.slice(0, opts.limit ?? rows.length);
+      if (range === undefined) return rows.slice(0, Math.min(opts.limit ?? rows.length, ENGINE_CAP));
       assert.equal(opts.index, indexName, 'index name');
       assert.equal(opts.useLGKeyRange, true, 'useLGKeyRange');
       assert.equal(opts.direction, 'prev', 'direction');
       if (requirePartition) assert.equal(opts.partition, CONV, 'partition');
       let hits = rows.filter(r => cmpKey(keyOf(r), range.from) >= 0 && cmpKey(keyOf(r), range.to) <= 0);
       if (range.excludeTo) hits = hits.filter(r => cmpKey(keyOf(r), range.to) < 0);
-      hits.sort((a, b) => cmpKey(keyOf(b), keyOf(a)));
-      return hits.slice(0, opts.limit);
+      hits.sort((a, b) => cmpKey(keyOf(b), keyOf(a))); // stable: rows with an identical key keep their stored order
+      return hits.slice(0, Math.min(opts.limit, ENGINE_CAP));
     },
     async count() { return rows.length; },
   };
@@ -142,6 +144,17 @@ test('locate({fastPath:false}) forces the shape search even when the known id ex
 test('createBridge fails with MODULE_NOT_FOUND when no module has the DB manager shape', async () => {
   const { connection } = makeFakeZalo({ withModule: false });
   await assert.rejects(createBridge(connection), err => err.code === 'MODULE_NOT_FOUND' && /Zalo/.test(err.message));
+});
+
+test('MODULE_NOT_FOUND tells the user what to do next, not only what went wrong', async () => {
+  const { connection } = makeFakeZalo({ withModule: false });
+  await assert.rejects(createBridge(connection), err => {
+    assert.equal(err.code, 'MODULE_NOT_FOUND');
+    assert.match(err.message, /Cách xử lý/);
+    assert.match(err.message, /Zalo \(MI\)/, 'step: reopen Zalo through the collection shortcut');
+    assert.match(err.message, /cập nhật công cụ zmi/, 'step: the tool itself needs an update when Zalo renamed its internals');
+    return true;
+  });
 });
 
 test('createBridge fails with MODULE_NOT_FOUND when the page has no webpack runtime', async () => {
@@ -238,13 +251,47 @@ test('getMessages stops after one page when the page is not full', async () => {
   assert.equal(log.filter(e => e.store === 'Core.Message').length, 1);
 });
 
-test('getMessages does not loop forever when many rows share the same index key', async () => {
+test('getMessages treats rows with the same msgId as one message and still terminates', async () => {
   const dup = i => msg(1, { cliMsgId: `c${i}` }); // identical (convId, sendDttm, msgId) tuple
   const { connection, log } = makeFakeZalo({ messages: [dup(1), dup(2), dup(3)] });
   const bridge = await createBridge(connection);
   const got = await bridge.getMessages(CONV, { limit: 2 });
-  assert.ok(got.length >= 1);
-  assert.ok(log.filter(e => e.store === 'Core.Message').length <= 3, 'terminates quickly');
+  assert.equal(got.length, 1);
+  assert.ok(log.filter(e => e.store === 'Core.Message').length <= 4, 'terminates quickly');
+});
+
+test('getMessages is gapless when equal sendDttm values with distinct msgIds straddle page boundaries', async () => {
+  const tied = i => msg(3, { sendDttm: '1700000005500', msgId: String(5000100 + i), message: `tie${i}` });
+  const rows = [msg(1), msg(2), tied(1), tied(2), tied(3), tied(4), tied(5), msg(9), msg(10)];
+  const newestFirst = [...rows].sort((a, b) => cmpKey([b.sendDttm, b.msgId], [a.sendDttm, a.msgId]));
+  for (const limit of [2, 3, 4, 5]) {
+    const { connection } = makeFakeZalo({ messages: rows });
+    const bridge = await createBridge(connection);
+    const got = await bridge.getMessages(CONV, { limit });
+    assert.deepEqual(got.map(m => m.msgId), newestFirst.map(m => m.msgId), `limit ${limit}: every row, newest first, none lost`);
+  }
+});
+
+test('getMessages with limit 1 returns every message instead of stopping after one', async () => {
+  const rows = Array.from({ length: 6 }, (_, i) => msg(i + 1));
+  const { connection } = makeFakeZalo({ messages: rows });
+  const bridge = await createBridge(connection);
+  const got = await bridge.getMessages(CONV, { limit: 1 });
+  assert.deepEqual(got.map(m => m.message), ['m6', 'm5', 'm4', 'm3', 'm2', 'm1']);
+});
+
+test('getMessages and getMediaRows reject a limit that would silently truncate', async () => {
+  const { connection, log } = makeFakeZalo({ messages: [msg(1)] });
+  const bridge = await createBridge(connection);
+  for (const limit of [0, -1, 1.5, NaN, Infinity, '5', null, ENGINE_CAP + 1, 20000]) {
+    await assert.rejects(bridge.getMessages(CONV, { limit }), RangeError, `getMessages limit ${String(limit)}`);
+    await assert.rejects(bridge.getMediaRows(CONV, 'File', { limit }), RangeError, `getMediaRows limit ${String(limit)}`);
+  }
+  for (const maxPages of [0, -1, 1.5, NaN, '2']) {
+    await assert.rejects(bridge.getMessages(CONV, { maxPages }), RangeError, `maxPages ${String(maxPages)}`);
+  }
+  assert.deepEqual(log.filter(e => e.method === 'getAll'), [], 'invalid options fail before any read');
+  assert.equal((await bridge.getMessages(CONV, { limit: ENGINE_CAP })).length, 1, 'the cap itself is a valid limit');
 });
 
 test('getMessages honours fromTs as an inclusive lower bound', async () => {
@@ -290,14 +337,49 @@ test('getMediaRows returns only the rows of the conversation, using the convId i
   assert.deepEqual(writes(log), []);
 });
 
-test('getMediaRows pages past the engine cap instead of scanning the whole store', async () => {
-  const mine = Array.from({ length: 4500 }, (_, i) => mediaRow(CONV, i + 1));
+test('getMediaRows returns more rows than Zalo hands out in one read by paging', async () => {
+  const mine = Array.from({ length: ENGINE_CAP + 2000 }, (_, i) => mediaRow(CONV, i + 1));
   const { connection, log } = makeFakeZalo({ media: { Image: mine } });
   const bridge = await createBridge(connection);
   const rows = await bridge.getMediaRows(CONV, 'Image');
-  assert.equal(rows.length, 4500);
-  assert.equal(new Set(rows.map(r => r.mediaId)).size, 4500);
-  assert.ok(log.filter(e => e.store === 'Media.Image').length >= 3);
+  assert.equal(rows.length, ENGINE_CAP + 2000);
+  assert.equal(new Set(rows.map(r => r.mediaId)).size, ENGINE_CAP + 2000);
+  assert.ok(log.filter(e => e.store === 'Media.Image').length >= 6);
+});
+
+// Media indexes are not unique: several rows (e.g. the files of one message) can share
+// (convId, sendDttm, cliMsgId) and differ only by mediaId.
+function tiedMediaRows(count, { sendDttm = 1700000005500, cliMsgId = '7000500' } = {}) {
+  return Array.from({ length: count }, (_, i) => ({ mediaId: `tie-${sendDttm}-${i + 1}`, convId: CONV, cliMsgId, sendDttm, type: 1 }));
+}
+const mediaIdsSorted = rows => rows.map(r => r.mediaId).sort();
+
+test('getMediaRows is gapless when rows with an identical index key straddle a page boundary', async () => {
+  const rows = [...[1, 2].map(n => mediaRow(CONV, n)), ...tiedMediaRows(3), ...[9, 10].map(n => mediaRow(CONV, n))];
+  const { connection } = makeFakeZalo({ media: { File: rows } });
+  const bridge = await createBridge(connection);
+  for (const limit of [4, 5]) {
+    const got = await bridge.getMediaRows(CONV, 'File', { limit });
+    assert.deepEqual(mediaIdsSorted(got), mediaIdsSorted(rows), `limit ${limit}: every row, none lost, none duplicated`);
+    assert.deepEqual(got.map(r => r.sendDttm), got.map(r => r.sendDttm).sort((a, b) => b - a), 'newest first');
+  }
+});
+
+test('getMediaRows is gapless even when more rows share one key than fit in a page', async () => {
+  const rows = [mediaRow(CONV, 1), ...tiedMediaRows(5), mediaRow(CONV, 10)];
+  for (const limit of [1, 2, 3]) {
+    const { connection } = makeFakeZalo({ media: { Link: rows } });
+    const bridge = await createBridge(connection);
+    const got = await bridge.getMediaRows(CONV, 'Link', { limit });
+    assert.deepEqual(mediaIdsSorted(got), mediaIdsSorted(rows), `limit ${limit}: the page widens until the tie group fits`);
+  }
+});
+
+test('getMediaRows fails loudly when one key is shared by more rows than Zalo can return in one read', async () => {
+  const rows = [mediaRow(CONV, 1), ...tiedMediaRows(ENGINE_CAP + 1)];
+  const { connection } = makeFakeZalo({ media: { Image: rows } });
+  const bridge = await createBridge(connection);
+  await assert.rejects(bridge.getMediaRows(CONV, 'Image'), err => err.code === 'PAGINATION_STUCK' && /Zalo/.test(err.message));
 });
 
 test('getMediaRows rejects unknown stores', async () => {

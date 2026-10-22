@@ -34,8 +34,11 @@ function openZaloGuidance(port) {
   ].join('\n');
 }
 
-/** Checks the whole read path. Never touches data/zalo-mi.db. Returns the process exit code. */
-async function doctor({ port }) {
+/**
+ * Checks the whole read path. Never touches data/zalo-mi.db. Returns the process exit code.
+ * `open` and `dataDir` are injectable so the checks can be run against a fake Zalo and a scratch directory.
+ */
+export async function doctor({ port, open = openBridge, dataDir = DATA_DIR }) {
   let failures = 0;
   const check = (passed, text) => { passed ? ok(text) : (bad(text), failures++); };
 
@@ -45,7 +48,7 @@ async function doctor({ port }) {
 
   let bridge;
   try {
-    bridge = await openBridge({ port });
+    bridge = await open({ port });
   } catch (error) {
     if (error instanceof CdpError && error.code === 'PORT_CLOSED') {
       bad(error.message);
@@ -78,7 +81,12 @@ async function doctor({ port }) {
       const shape = await bridge.locate({ fastPath: false });
       ok(`Tìm theo hình dạng cũng ra module ${shape.moduleId} (dự phòng khi Zalo đổi tên module)`);
     } catch (error) {
-      check(false, `Tìm module theo hình dạng thất bại: ${error.message}`);
+      check(false, error instanceof BridgeError
+        ? [
+          `Tìm module theo hình dạng thất bại: đường nhanh (module ${moduleId}) vẫn chạy, nhưng khi Zalo đổi tên module thì zmi sẽ không tìm lại được.`,
+          '  Cách xử lý: cập nhật công cụ zmi (phần tìm module trong lib/zalo-bridge.mjs) trước khi Zalo cập nhật.',
+        ].join('\n')
+        : `Tìm module theo hình dạng thất bại: ${error.message}`);
     }
 
     try {
@@ -101,9 +109,9 @@ async function doctor({ port }) {
     bridge.close();
   }
 
-  const probe = join(DATA_DIR, `.doctor-${process.pid}-${Date.now()}.tmp`);
+  const probe = join(dataDir, `.doctor-${process.pid}-${Date.now()}.tmp`);
   try {
-    mkdirSync(DATA_DIR, { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
     writeFileSync(probe, 'zmi doctor');
     if (readFileSync(probe, 'utf8') !== 'zmi doctor') throw new Error('nội dung đọc lại không khớp');
     check(true, 'Ghi được vào thư mục data/ (file tạm đã xóa)');
