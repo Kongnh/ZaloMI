@@ -13,7 +13,7 @@ Cong (Allotrope Partners Vietnam) is in many Zalo renewable-energy groups and ha
 
 ## Hard rules
 
-1. **Read only.** Use only `zmi sync`, `zmi export`, `zmi search` (and the launch script below). Never read `data/zalo-mi.db` directly, never edit `config/groups.json`, never run `--full`, `--retry`, `--rescan` or `--prune-photos` (the last one deletes files). Never send anything on Zalo.
+1. **Read only.** Use only `zmi groups --refresh`, `zmi sync`, `zmi export`, `zmi search`, the launch script and `scripts/read-pdf.py` (below). Never read `data/zalo-mi.db` directly, never edit `config/groups.json`, never run `--full`, `--retry`, `--rescan` or `--prune-photos` (the last one deletes files). Never send anything on Zalo.
 2. **No personal phone numbers or e-mails in the report**, in the chat reply, or in anything a subagent returns. Chat text in the export is already masked (`[SĐT]`, `[email]`), but **OCR text from images and file contents are not**. Organisation or event hotlines (1900/1800, an organiser's switchboard) and generic addresses (info@, contact@, ban tổ chức) are fine. When unsure whether a number is personal, leave it out and write "liên hệ người đăng trong nhóm".
 3. **No Zalo user ids** anywhere.
 4. **Cite every item**: `(Nhóm, dd/mm, Người gửi, #m<mã tin>)`. Group names may be shortened to something recognisable.
@@ -30,7 +30,12 @@ Cong (Allotrope Partners Vietnam) is in many Zalo renewable-energy groups and ha
 
 ### 2. Sync
 
-Run `node …\zmi.mjs sync` (in the background; it can take several minutes because it also saves new attachments and scans new screenshots at the end). Print nothing to Cong but a one-line status while it runs.
+First run `node …\zmi.mjs groups --refresh` (needs Zalo in collection mode, like sync; it reads only). It picks up groups Cong joined since the last run.
+- A new group whose name matches the energy keywords (năng lượng, solar, điện, gió, BESS, DPPA, ESG, carbon…) is set to tracked automatically. The next sync reads its whole history.
+- A new group that does not match stays untracked. Groups Cong set by hand are never changed.
+- The first output line says how many groups are new and how many were suggested. In the reply to Cong, name the new tracked groups and the new untracked ones whose name still looks business-related, so he can switch them on or off in `config/groups.json`. Never edit that file yourself.
+
+Then run `node …\zmi.mjs sync` (in the background; it can take several minutes because it also saves new attachments and scans new screenshots at the end). Print nothing to Cong but a one-line status while it runs.
 
 - **Exit 0**: continue.
 - **Zalo not open in collection mode** (exit 1 with the message about opening "Zalo (MI)"): run `powershell -ExecutionPolicy Bypass -File C:\Users\kongn\Pictures\CodeProject\Zalodatabase\scripts\zalo-mi-launch.ps1`. It never closes a running Zalo.
@@ -51,10 +56,31 @@ Line format in group files: `[HH:mm] Người gửi: nội dung #m<mã tin>` und
 
 ### 4. Read the groups
 
-Check file sizes (`wc -c` on the group files).
+**Triage by cost before reading.** Reading costs about 130k tokens per 100 KB of export, through subagents. A large group that is mostly product ads is not worth that: in the first run, the 965 KB TỔNG KHO group cost about 1.2M tokens and yielded only prices that other groups also had. For every group file, measure its size and its *signal density*: the share of message lines that mention policy, projects or events. In Git Bash, from the export folder:
+
+```bash
+for f in *.md; do case $f in index.md|members.md|attachments.md) continue;; esac; t=$(grep -c "^\[" "$f"); s=$(grep -ciE "nghị định|thông tư|công văn|quyết định|dự thảo|nghị quyết|DPPA|dự án|[0-9] ?MW\b|hội thảo|diễn đàn|khung giá|quy hoạch|EVN|Bộ Công Thương|luật" "$f"); echo "$(( $(wc -c <"$f")/1024 )) KB | $t dòng | tín hiệu $(( t>0 ? 100*s/t : 0 ))% | $f"; done
+```
+
+(First run, for reference: news and policy groups had 20–26% signal, DOANH NHÂN SOLAR 3%, TỔNG KHO 1%.)
+
+- **Over 150 KB and signal under 5%**: do not read the group in full. Take the cheap path:
+  - Pull only the lines that matter: the signal pattern above plus lines that carry an actual price number. A bare "giá" matches every ad ("giá tốt"), so it is not in the pattern.
+
+    ```bash
+    P='nghị định|thông tư|công văn|quyết định|dự thảo|nghị quyết|DPPA|dự án|[0-9] ?MW\b|hội thảo|diễn đàn|khung giá|quy hoạch|EVN|Bộ Công Thương|luật|[0-9][.,]?[0-9x]{2,3} ?(đ|đồng|vnđ|k)? ?/ ?w|đ/kwh|[0-9]+([.,][0-9x]+)? ?(triệu|tr)\b'
+    grep -iE "$P" "<file>" | grep -v "đăng lại tin" > "<scratchpad>/<group>-signal.txt"
+    ```
+
+  - On TỔNG KHO this kept 92 KB of 965 KB.
+  - Read the result yourself if it is under ~60 KB. Otherwise give it to one `model: "sonnet"` subagent with the normal extraction prompt.
+  - Say in the report's scope box that the group was only scanned by keyword, and why (size, signal %).
+  - If even the keyword lines are just ads with no price or news, skip the group and say so in the same place.
+- Cong may override this in his request, e.g. "đọc kỹ cả nhóm TỔNG KHO". His words win.
+- Everything else goes to the normal path below.
 
 - **Files up to ~60 KB**: read them yourself.
-- **Bigger files**: hand them to subagents (Agent tool, general-purpose), all in parallel in one message. Split files over ~120 KB into chunks of about 100 KB at day headers (`grep -n "^## " <file>` gives the line numbers) and give each subagent a line range. Sales-heavy groups (TỔNG KHO, ĐỘI THI CÔNG, DOANH NHÂN SOLAR…) are mostly product ads: tell the subagent to keep only price points, new products/brands, projects and real news.
+- **Bigger files**: hand them to subagents (Agent tool, general-purpose), all in parallel in one message. Use `model: "sonnet"` for the sales-heavy chunks: they only yield prices and product lists. The first run spent about 130k tokens per 100 KB chunk, and TỔNG KHO alone took 9 chunks. Split files over ~120 KB into chunks of about 100 KB at day headers (`grep -n "^## " <file>` gives the line numbers) and give each subagent a line range. Sales-heavy groups (TỔNG KHO, ĐỘI THI CÔNG, DOANH NHÂN SOLAR…) are mostly product ads: tell the subagent to keep only price points, new products/brands, projects and real news.
 
 Subagent prompt (fill in the brackets; the subagent starts cold, so include the rules):
 
@@ -62,7 +88,15 @@ Subagent prompt (fill in the brackets; the subagent starts cold, so include the 
 
 ### 5. Look at attachments selectively
 
-From the group files, `attachments.md` and the subagents' picks, open only what bears on policy, prices, projects or events: screenshots with the Read tool (it shows images), PDFs with Read and `pages: "1-3"`. Usually 5–15 items, not everything. A file marked `chỉ có link` is not on the machine: just list it.
+From the group files, `attachments.md` and the subagents' picks, open only what bears on policy, prices, projects or events. Usually 5–15 items, not everything. A file marked `chỉ có link` is not on the machine: just list it.
+
+- Screenshots: the Read tool (it shows images).
+- PDFs: run `python -E C:\Users\kongn\Pictures\CodeProject\Zalodatabase\scripts\read-pdf.py "<file.pdf>" --pages 1-3 --out <scratchpad>` from the project folder.
+  - It prints the text layer with correct Vietnamese diacritics (PyMuPDF).
+  - For a scanned page it renders a PNG and prints its path instead; open that PNG with Read.
+  - Do not use Read's `pages` on PDFs (no `pdftoppm` on this machine), and avoid `pdftotext`: it garbles the diacritics of many government PDFs.
+  - Use `-E`, not `-I`: `-I` hides the user-site PyMuPDF.
+- Write down in the report's scope box which documents were opened in full and which were not.
 
 ### 6. New members
 

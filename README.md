@@ -221,6 +221,7 @@ Nhóm `☀️ Future Energy Vietnam 🇻🇳`, giai đoạn 22/09 đến 05/10/2
 | `lib/db.mjs` | Database riêng: lược đồ, upsert idempotent, tìm toàn văn FTS5 bỏ dấu |
 | `lib/normalize.mjs` | Chuẩn hóa tin thô của Zalo theo `msgType` thành tin, link, file, ảnh, sự kiện thành viên |
 | `scripts/zalo-mi-launch.ps1` | Mở Zalo kèm cổng debug, tạo lối tắt "Zalo (MI)" |
+| `scripts/read-pdf.py` | Đọc chữ PDF đúng dấu tiếng Việt (PyMuPDF, đã cài sẵn); trang scan được xuất ra ảnh PNG để Claude xem. Chạy: `python -E scripts/read-pdf.py "<file.pdf>" --pages 1-3` |
 | `skills/zalo-mi/SKILL.md` | Skill lập bản tin (bản gốc; bản đang dùng ở `%USERPROFILE%\.claude\skills\zalo-mi\`) |
 | `lib/net.mjs` | `guardedFetch` (tải chỉ từ máy chủ công cộng, kiểm địa chỉ lúc kết nối và ở mỗi lần chuyển hướng), `checkRemoteUrl`, `isPrivateAddress`; dùng chung cho `files` và `images` |
 | `lib/images.mjs` | `shapeClass`, `textScore`/`hasText` (quyết định có chữ), `jpegVariantUrl`, `fetchImage` (tải ảnh qua `guardedFetch`, giới hạn thời gian và dung lượng), `scanImages` (phần tồn đọng của ảnh chụp màn hình: cache máy, link, giải mã, OCR, lưu; đồng thời 3 ảnh, bảo vệ ổ đĩa), `prunePhotoImages` (xóa file ảnh dáng `photo`, giữ chữ OCR), in kết quả |
