@@ -5,11 +5,12 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  shapeClass, textScore, hasText, jpegVariantUrl, checkRemoteUrl, fetchImage, scanImages, formatImagesSummary, imagesStatusLine, MIN_TEXT_WORDS,
+  shapeClass, textScore, hasText, jpegVariantUrl, fetchImage, scanImages, formatImagesSummary, imagesStatusLine, MIN_TEXT_WORDS,
   prunePhotoImages,
 } from '../lib/images.mjs';
+import { NetGuardError } from '../lib/net.mjs';
 import { openDb } from '../lib/db.mjs';
-import { imagesCommand } from '../zmi.mjs';
+import { imagesCommand, syncCommand } from '../zmi.mjs';
 import { CdpError } from '../lib/cdp.mjs';
 
 // No test touches the internet, Zalo or the real data/ folder: the network is a fake fetch + fake DNS, Zalo's decoder and
@@ -50,18 +51,20 @@ function fakeBridge({ ocrFails = new Set(), connectionDropsAt } = {}) {
   };
 }
 
-/** Fake fetch over `routes[url] = { status?, type?, body?, location? }`; unknown urls are 404. `hits` lists the requests. */
+/**
+ * Fake of lib/net.mjs guardedFetch over `routes[url] = { status?, type?, body?, error?, guard? }`; unknown urls are 404.
+ * `guard` is a NetGuardError the real guard would throw (refused address, bad redirect). `hits` lists the requests.
+ */
 function fakeFetch(routes = {}) {
   const hits = [];
   const fn = async (url, opts = {}) => {
     hits.push(url);
-    assert.equal(opts.redirect, 'manual', 'redirects are followed by hand so every hop is checked');
+    assert.ok(opts.signal instanceof AbortSignal, 'every download carries a timeout signal');
     const r = routes[url];
     if (!r) return new Response(null, { status: 404 });
+    if (r.guard) throw r.guard;
     if (r.error) throw Object.assign(new TypeError('fetch failed'), { cause: { code: r.error } });
-    const headers = { 'content-type': r.type ?? 'image/jpeg' };
-    if (r.location) headers.location = r.location;
-    return new Response(r.body ?? null, { status: r.status ?? 200, headers });
+    return new Response(r.body ?? null, { status: r.status ?? 200, headers: { 'content-type': r.type ?? 'image/jpeg' } });
   };
   return Object.assign(fn, { hits });
 }
@@ -154,35 +157,26 @@ test('jpegVariantUrl asks Zalo\'s photo CDN for the JPEG rendition of a JXL link
 // Network hygiene
 // ---------------------------------------------------------------------------------------------------------------------
 
-test('checkRemoteUrl allows public http(s) only: other schemes, loopback and private hosts are refused', async () => {
-  assert.equal(await checkRemoteUrl('https://photo-stal-38.zdn.vn/gr/jpg/a.jpg', { lookup: publicDns }), null);
-  assert.equal(await checkRemoteUrl('http://b-f64-zpg-r.zdn.vn/a.jpg', { lookup: publicDns }), null);
-  for (const url of ['file:///C:/Users/x/a.jpg', 'ftp://example.com/a.jpg', 'data:image/jpeg;base64,AAAA', 'javascript:alert(1)', 'not a url',
-    'http://127.0.0.1/a.jpg', 'http://localhost:9222/json/list', 'http://zalo.localhost/a.jpg', 'http://10.1.2.3/a.jpg', 'http://172.16.0.9/a.jpg',
-    'http://192.168.1.20/a.jpg', 'http://169.254.169.254/latest', 'http://0.0.0.0/a.jpg', 'http://[::1]/a.jpg', 'http://[fd12::1]/a.jpg',
-    'http://[fe80::1]/a.jpg', 'http://[::ffff:127.0.0.1]/a.jpg', 'http://100.64.0.1/a.jpg']) {
-    assert.equal(typeof await checkRemoteUrl(url, { lookup: publicDns }), 'string', url);
-  }
-  const toLoopback = async () => [{ address: '127.0.0.1', family: 4 }];
-  assert.match(await checkRemoteUrl('https://evil.example/a.jpg', { lookup: toLoopback }), /nội bộ/, 'a public name that resolves to a private address');
+// The address rules themselves (connect-time refusal, redirects re-checked per hop) are tested in test/net.test.mjs.
+
+test('fetchImage downloads through the guarded fetch by default: a link to this PC is unavailable and never requested', async () => {
+  const refused = await fetchImage('http://127.0.0.1:9222/json/list');
+  assert.equal(refused.status, 'unavailable');
+  assert.match(refused.error, /nội bộ 127\.0\.0\.1/);
+  const named = await fetchImage('http://localhost:9222/json/list');
+  assert.match(named.error, /localhost/);
 });
 
-test('fetchImage never sends a request to a refused address, and re-checks every redirect hop', async () => {
+test('fetchImage: a refused address or a malformed redirect from the guard ends as unavailable, never an escaping throw', async () => {
   const fetchFn = fakeFetch({
-    'https://cdn.example/a.jpg': { status: 302, location: 'http://192.168.0.5/a.jpg' },
-    'https://cdn.example/b.jpg': { status: 301, location: 'https://cdn2.example/b.jpg' },
-    'https://cdn2.example/b.jpg': { body: jpeg('poster') },
+    'https://cdn.example/rebind.jpg': { guard: new NetGuardError('REFUSED', 'không tải từ địa chỉ nội bộ 127.0.0.1 (cdn.example)') },
+    'https://cdn.example/bad.jpg': { guard: new NetGuardError('BAD_REDIRECT', 'link chuyển hướng tới một địa chỉ không hợp lệ') },
+    'https://cdn.example/loop.jpg': { guard: new NetGuardError('TOO_MANY_REDIRECTS', 'link chuyển hướng quá 3 lần') },
   });
-  const refused = await fetchImage('http://127.0.0.1:9222/json', { fetchFn, lookup: publicDns });
-  assert.equal(refused.status, 'unavailable');
-  assert.equal(fetchFn.hits.length, 0);
-
-  const redirected = await fetchImage('https://cdn.example/a.jpg', { fetchFn, lookup: publicDns });
-  assert.equal(redirected.status, 'unavailable');
-  assert.deepEqual(fetchFn.hits, ['https://cdn.example/a.jpg'], 'the private redirect target is never requested');
-
-  const ok = await fetchImage('https://cdn.example/b.jpg', { fetchFn, lookup: publicDns });
-  assert.deepEqual(ok.bytes, jpeg('poster'));
+  assert.deepEqual(await fetchImage('https://cdn.example/rebind.jpg', { fetchFn }),
+    { status: 'unavailable', error: 'không tải từ địa chỉ nội bộ 127.0.0.1 (cdn.example)', host: true });
+  assert.deepEqual(await fetchImage('https://cdn.example/bad.jpg', { fetchFn }), { status: 'unavailable', error: 'link chuyển hướng tới một địa chỉ không hợp lệ' });
+  assert.equal((await fetchImage('https://cdn.example/loop.jpg', { fetchFn })).status, 'unavailable');
 });
 
 test('fetchImage: an expired link is unavailable, a body over the cap is cut off, a web page is not an image', async () => {
@@ -360,6 +354,50 @@ test('an OCR failure is failed with the reason, is not marked scanned, and is re
     r = row(db, '1');
     assert.equal(r.status, 'stored');
     assert.equal(r.error, null, 'the old reason is cleared');
+    db.close();
+  } finally { s.cleanup(); }
+});
+
+test('10 new images failing in a row abort the run (the engine is broken): the rest stay unscanned', async () => {
+  const s = scratch();
+  try {
+    const db = openDb(s.dbPath);
+    for (let i = 1; i <= 12; i++) { seedImage(db, { msg_id: `n${i}`, ts: NOW - i * DAY }); cachePicture(s, 'g1', `n${i}`, 'jpg', jpeg('broken')); }
+    const summary = await scanImages(db, options(s, { bridge: fakeBridge({ ocrFails: new Set(['broken']) }), concurrency: 1 }));
+    assert.match(summary.aborted, /10 ảnh lỗi liên tiếp/);
+    assert.equal(summary.failed, 10);
+    assert.equal(summary.untouched, 2);
+    db.close();
+  } finally { s.cleanup(); }
+});
+
+test('images that keep failing go after new ones, never trip the abort, and are given up after 3 attempts', async () => {
+  const s = scratch();
+  try {
+    const db = openDb(s.dbPath);
+    for (let i = 1; i <= 12; i++) { seedImage(db, { msg_id: `bad${i}`, ts: NOW - i * DAY }); cachePicture(s, 'g1', `bad${i}`, 'jpg', jpeg('broken')); }
+    const bridge = fakeBridge({ ocrFails: new Set(['broken']) });
+    await scanImages(db, options(s, { bridge, concurrency: 1, limit: 9 })); // 9 failures: no abort yet, now they are "failed"
+    await scanImages(db, options(s, { bridge, concurrency: 1, limit: 3 })); // the other 3 fail too
+    assert.equal(db.raw.prepare("SELECT count(*) AS n FROM images WHERE status = 'failed' AND fail_count = 1").get().n, 12);
+
+    seedImage(db, { msg_id: 'new1', ts: NOW - 30 * DAY });
+    seedImage(db, { msg_id: 'new2', ts: NOW - 31 * DAY });
+    cachePicture(s, 'g1', 'new1', 'jpg', jpeg('poster'));
+    cachePicture(s, 'g1', 'new2', 'jpg', jpeg('poster2'));
+    const order = [];
+    const second = await scanImages(db, options(s, { bridge, concurrency: 1, onProgress: e => { if (e.type === 'image') order.push(e.row.msg_id); } }));
+    assert.deepEqual(order.slice(0, 2), ['new1', 'new2'], 'never-tried images first, even though they are older');
+    assert.equal(second.aborted, null, 'images that failed before do not count towards the 10-in-a-row abort');
+    assert.equal(second.stored, 2);
+    assert.equal(second.failed, 12);
+
+    const third = await scanImages(db, options(s, { bridge, concurrency: 1 }));
+    assert.equal(third.failed, 12);
+    assert.equal(db.raw.prepare('SELECT max(fail_count) AS n FROM images').get().n, 3);
+    const fourth = await scanImages(db, options(s, { bridge, concurrency: 1 }));
+    assert.equal(fourth.total, 0, 'after 3 failed attempts an image is no longer retried (only --rescan brings it back)');
+    assert.equal((await scanImages(db, options(s, { bridge, concurrency: 1, rescan: true, limit: 1 }))).total, 1);
     db.close();
   } finally { s.cleanup(); }
 });
@@ -601,7 +639,7 @@ test('zmi images scans with Zalo open, prints progress and the summary, and a se
     db.close();
     let closed = 0;
     const bridge = { ...fakeBridge(), close() { closed++; } };
-    const run = opts => captured(() => imagesCommand({ port: 9222, open: async () => bridge, dbPath: s.dbPath, imageOptions: { appData: s.appData, lookup: publicDns, statfs: plenty }, ...opts }));
+    const run = opts => captured(() => imagesCommand({ port: 9222, open: async () => bridge, dbPath: s.dbPath, imageOptions: { appData: s.appData, fetchFn: fakeFetch(), lookup: publicDns, statfs: plenty }, ...opts }));
 
     const first = await run({});
     assert.equal(first.code, 0, first.err);
@@ -625,7 +663,7 @@ test('zmi images with Zalo closed explains how to open it and writes nothing', a
     const db = openDb(s.dbPath);
     seedImage(db, { msg_id: '1' });
     db.close();
-    const r = await captured(() => imagesCommand({ port: 9222, open: async () => { throw new CdpError('PORT_CLOSED', 'Không kết nối được cổng debug.'); }, dbPath: s.dbPath }));
+    const r = await captured(() => imagesCommand({ port: 9222, open: async () => { throw new CdpError('PORT_CLOSED', 'Không kết nối được cổng debug.'); }, dbPath: s.dbPath, imageOptions: { fetchFn: fakeFetch() } }));
     assert.equal(r.code, 1);
     assert.match(r.err, /Zalo \(MI\)/);
     const again = openDb(s.dbPath);
@@ -637,7 +675,7 @@ test('zmi images with Zalo closed explains how to open it and writes nothing', a
 test('zmi images without a database says to run sync first and does not open Zalo', async () => {
   const s = scratch();
   try {
-    const r = await captured(() => imagesCommand({ port: 9222, open: async () => { throw new Error('should not open'); }, dbPath: s.dbPath }));
+    const r = await captured(() => imagesCommand({ port: 9222, open: async () => { throw new Error('should not open'); }, dbPath: s.dbPath, imageOptions: { fetchFn: fakeFetch() } }));
     assert.equal(r.code, 1);
     assert.match(r.err, /node zmi\.mjs sync/);
     assert.equal(existsSync(s.dbPath), false);
@@ -652,7 +690,7 @@ test('zmi images --prune-photos works without Zalo, scans nothing, and prints wh
     seedStored(db, s, { msg_id: 'shot', width: 1080, height: 2340 });
     seedImage(db, { msg_id: 'pending-shot' });
     db.close();
-    const r = await captured(() => imagesCommand({ port: 9222, prunePhotos: true, open: async () => { throw new Error('should not open Zalo'); }, dbPath: s.dbPath }));
+    const r = await captured(() => imagesCommand({ port: 9222, prunePhotos: true, open: async () => { throw new Error('should not open Zalo'); }, dbPath: s.dbPath, imageOptions: { fetchFn: fakeFetch() } }));
     assert.equal(r.code, 0, r.err);
     assert.match(r.out, /Đã xóa 1 file ảnh không phải ảnh chụp màn hình \(2 MB\)/);
     assert.match(r.out, /giữ nguyên chữ OCR/);
@@ -661,6 +699,40 @@ test('zmi images --prune-photos works without Zalo, scans nothing, and prints wh
     assert.equal(row(after, 'pending-shot').scanned_at, null, 'no scan ran');
     assert.equal(row(after, 'p1').status, 'text_only');
     after.close();
+  } finally { s.cleanup(); }
+});
+
+test('zmi sync ends with the screenshot scan on the same bridge and prints its summary; a scan failure only warns', async () => {
+  const s = scratch();
+  try {
+    const configPath = join(s.root, 'config', 'groups.json');
+    mkdirSync(join(s.root, 'config'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({ version: 1, groups: [{ convId: 'g1', name: 'Nhóm 1', tracked: true, note: '' }] }));
+    const link = id => `https://b-f64-zpg-r.zdn.vn/55/${id}.jpg`;
+    const photo = (msgId, width, height) => ({
+      msgId, cliMsgId: `c${msgId}`, msgType: 2, sendDttm: String(Date.now() - DAY), fromUid: 'u1', dName: 'A',
+      message: { title: '', hdUrl: link(msgId), params: JSON.stringify({ width, height }) },
+    });
+    const messages = [photo('101', 1080, 2340), photo('102', 4032, 3024)];
+    const fetchFn = fakeFetch({ [link('101')]: { body: jpeg('poster') }, [link('102')]: { body: jpeg('poster') } });
+    const imageOptions = { appData: s.appData, fetchFn, lookup: publicDns, statfs: plenty };
+    let opened = 0;
+    const bridge = { ...fakeBridge(), async getMessages() { return messages; }, close() {} };
+    const run = b => captured(() => syncCommand({
+      port: 9222, open: async () => { opened++; return b; }, configPath, dbPath: s.dbPath, fileOptions: { appData: s.appData }, imageOptions,
+    }));
+
+    const first = await run(bridge);
+    assert.equal(first.code, 0, first.err);
+    assert.match(first.out, /Đã quét 1 ảnh: 1 có chữ \(đã lưu\), 0 không có chữ, 0 không còn tải được, 0 lỗi/);
+    assert.equal(opened, 1, 'one bridge for the messages, the files and the images');
+    assert.deepEqual(stored(s), ['101.jpg']);
+    assert.deepEqual(fetchFn.hits, [link('101')], 'the photo-shaped image is never fetched');
+
+    const noOcr = { async getMessages() { return messages; }, close() {} };
+    const second = await run(noOcr);
+    assert.equal(second.code, 0, 'a failed image scan never fails sync');
+    assert.match(second.err, /⚠ Không quét được ảnh chụp màn hình/);
   } finally { s.cleanup(); }
 });
 

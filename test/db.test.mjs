@@ -445,6 +445,7 @@ test('images.error exists, and a database created before the column existed gets
     const reopened = openDb(file);
     const cols = reopened.raw.prepare('PRAGMA table_info(images)').all().map(c => c.name);
     assert.ok(cols.includes('error'), 'column added');
+    assert.ok(cols.includes('fail_count'), 'fail_count added too (zmi images gives up on a screenshot after 3 failed attempts)');
     assert.equal(reopened.raw.prepare("SELECT width FROM images WHERE msg_id = 'old1'").get().width, 640, 'existing row kept');
     reopened.upsertImage({ msg_id: 'old1', status: 'failed', error: 'x' });
     reopened.close();

@@ -13,8 +13,12 @@ import {
 import { openDb } from '../lib/db.mjs';
 import { syncCommand, filesCommand } from '../zmi.mjs';
 import { CdpError } from '../lib/cdp.mjs';
+import { guardedFetch, isPrivateAddress } from '../lib/net.mjs';
 
 // No test touches the internet or the real data/ folder: downloads go to a local http server, files to a temp root.
+// The download guard refuses 127.0.0.1 by design, so the tests reach their local server through localFetch, a guarded fetch
+// whose policy lets that one loopback address through (every other private address is still refused).
+const localFetch = (url, init) => guardedFetch(url, { ...init, refuse: address => address !== '127.0.0.1' && isPrivateAddress(address) });
 
 const md5 = buf => createHash('md5').update(buf).digest('hex');
 const PDF = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(2000, 7)]);
@@ -68,7 +72,9 @@ const fileOf = (db, msgId) => ({ ...db.raw.prepare('SELECT * FROM files WHERE ms
 const statusOf = (db, msgId) => fileOf(db, msgId).status;
 const filesIn = (root, conv = 'g1') => { const dir = join(root, 'data', 'files', conv); return existsSync(dir) ? readdirSync(dir).sort() : []; };
 const writeLocal = (root, name, content) => { const p = join(root, 'src', name); mkdirSync(join(root, 'src'), { recursive: true }); writeFileSync(p, content); return p; };
-const base = (root, extra = {}) => ({ rootDir: root, appData: APPDATA, ...extra });
+// The real drive may be nearly full: the disk guard is tested with explicit statfs fakes, every other test has plenty of room.
+const plenty = async () => ({ bsize: 1, bavail: 1e12 });
+const base = (root, extra = {}) => ({ rootDir: root, appData: APPDATA, fetchFn: localFetch, statfs: plenty, ...extra });
 
 // ---------------------------------------------------------------------------------------------------------------------
 // remapLocalPath
@@ -93,7 +99,7 @@ test('resolveFile copies an existing local file and verifies md5', async () => {
   const s = scratch();
   try {
     const src = writeLocal(s.root, 'a.pdf', PDF);
-    const result = await resolveFile(fileRow(), { rootDir: s.root, localPaths: [src] });
+    const result = await resolveFile(fileRow(), { rootDir: s.root, fetchFn: localFetch, localPaths: [src] });
     assert.equal(result.status, 'stored');
     assert.equal(result.source, 'local');
     assert.equal(result.stored_path, 'data/files/g1/2026-10-22_Báo cáo.pdf', 'date is UTC+7, path is relative to the repo root with forward slashes');
@@ -108,13 +114,13 @@ test('resolveFile does not trust a local file whose md5 differs, and falls back 
   const srv = await routeServer({ '/f': { type: 'application/pdf', body: PDF } });
   try {
     const wrong = writeLocal(s.root, 'wrong.pdf', PDF_SAME_SIZE);
-    const noLink = await resolveFile(fileRow(), { rootDir: s.root, localPaths: [wrong] });
+    const noLink = await resolveFile(fileRow(), { rootDir: s.root, fetchFn: localFetch, localPaths: [wrong] });
     assert.equal(noLink.status, 'failed');
     assert.match(noLink.error, /checksum MD5 không khớp/);
     assert.match(noLink.error, /không có link tải/);
     assert.deepEqual(filesIn(s.root), [], 'nothing stored');
 
-    const viaLink = await resolveFile(fileRow({ remote_url: `${srv.base}/f` }), { rootDir: s.root, localPaths: [wrong] });
+    const viaLink = await resolveFile(fileRow({ remote_url: `${srv.base}/f` }), { rootDir: s.root, fetchFn: localFetch, localPaths: [wrong] });
     assert.equal(viaLink.status, 'stored');
     assert.equal(viaLink.source, 'download');
     assert.deepEqual(readFileSync(join(s.root, viaLink.stored_path)), PDF);
@@ -126,7 +132,7 @@ test('resolveFile skips a local path that is a folder, or has the wrong size, wi
   try {
     mkdirSync(join(s.root, 'src', 'unpacked'), { recursive: true });
     const wrongSize = writeLocal(s.root, 'short.pdf', Buffer.from('%PDF-short'));
-    const result = await resolveFile(fileRow(), { rootDir: s.root, localPaths: [join(s.root, 'src', 'unpacked'), join(s.root, 'src', 'missing.pdf'), wrongSize] });
+    const result = await resolveFile(fileRow(), { rootDir: s.root, fetchFn: localFetch, localPaths: [join(s.root, 'src', 'unpacked'), join(s.root, 'src', 'missing.pdf'), wrongSize] });
     assert.equal(result.status, 'failed');
     assert.match(result.error, /kích thước khác/);
     assert.deepEqual(filesIn(s.root), []);
@@ -190,7 +196,7 @@ test('two different files with the same name and day get the msg_id suffix; the 
   const s = scratch();
   const srv = await routeServer({ '/a': { body: PDF }, '/b': { body: PDF2 }, '/c': { body: PDF } });
   try {
-    const opts = { rootDir: s.root };
+    const opts = { rootDir: s.root, fetchFn: localFetch };
     const a = await resolveFile(fileRow({ msg_id: '111', remote_url: `${srv.base}/a` }), opts);
     const b = await resolveFile(fileRow({ msg_id: '222', checksum: md5(PDF2), size: PDF2.length, remote_url: `${srv.base}/b` }), opts);
     const c = await resolveFile(fileRow({ msg_id: '333', remote_url: `${srv.base}/c` }), opts);
@@ -214,7 +220,7 @@ test('resolveFile downloads a real file over HTTP (following a redirect) and ver
     res.end(PDF);
   });
   try {
-    const result = await resolveFile(fileRow({ remote_url: `${srv.base}/old` }), { rootDir: s.root });
+    const result = await resolveFile(fileRow({ remote_url: `${srv.base}/old` }), { rootDir: s.root, fetchFn: localFetch });
     assert.equal(result.status, 'stored');
     assert.equal(result.source, 'download');
     assert.equal(result.bytes, PDF.length);
@@ -233,20 +239,20 @@ test('an HTML error page is rejected, not stored as the file', async () => {
     '/bom': { type: 'application/pdf', body: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('  <html><body>Hết hạn</body></html>')]) },
   });
   try {
-    const typed = await resolveFile(fileRow({ remote_url: `${srv.base}/typed` }), { rootDir: s.root });
+    const typed = await resolveFile(fileRow({ remote_url: `${srv.base}/typed` }), { rootDir: s.root, fetchFn: localFetch });
     assert.equal(typed.status, 'remote_only');
     assert.match(typed.error, /trang HTML/);
 
-    const sneaky = await resolveFile(fileRow({ remote_url: `${srv.base}/sneaky` }), { rootDir: s.root });
+    const sneaky = await resolveFile(fileRow({ remote_url: `${srv.base}/sneaky` }), { rootDir: s.root, fetchFn: localFetch });
     assert.equal(sneaky.status, 'remote_only', 'HTML under a pdf content-type is caught by its first bytes');
 
-    const noChecksum = await resolveFile(fileRow({ checksum: null, size: null, remote_url: `${srv.base}/sneaky` }), { rootDir: s.root });
+    const noChecksum = await resolveFile(fileRow({ checksum: null, size: null, remote_url: `${srv.base}/sneaky` }), { rootDir: s.root, fetchFn: localFetch });
     assert.equal(noChecksum.status, 'remote_only');
 
-    const bom = await resolveFile(fileRow({ checksum: null, size: null, remote_url: `${srv.base}/bom` }), { rootDir: s.root });
+    const bom = await resolveFile(fileRow({ checksum: null, size: null, remote_url: `${srv.base}/bom` }), { rootDir: s.root, fetchFn: localFetch });
     assert.equal(bom.status, 'remote_only', 'a byte order mark and leading spaces do not hide the HTML');
 
-    const forbidden = await resolveFile(fileRow({ remote_url: `${srv.base}/forbidden` }), { rootDir: s.root });
+    const forbidden = await resolveFile(fileRow({ remote_url: `${srv.base}/forbidden` }), { rootDir: s.root, fetchFn: localFetch });
     assert.equal(forbidden.status, 'remote_only');
     assert.match(forbidden.error, /HTTP 403/);
 
@@ -261,11 +267,11 @@ test('HTTP errors and network errors are failed with the reason', async () => {
   const deadUrl = `${dead.base}/x`;
   await dead.close();
   try {
-    const gone = await resolveFile(fileRow({ remote_url: `${srv.base}/nothing` }), { rootDir: s.root });
+    const gone = await resolveFile(fileRow({ remote_url: `${srv.base}/nothing` }), { rootDir: s.root, fetchFn: localFetch });
     assert.deepEqual([gone.status, gone.error], ['failed', 'HTTP 404 (link đã hết hạn)']);
-    const bad = await resolveFile(fileRow({ remote_url: `${srv.base}/bad` }), { rootDir: s.root });
+    const bad = await resolveFile(fileRow({ remote_url: `${srv.base}/bad` }), { rootDir: s.root, fetchFn: localFetch });
     assert.deepEqual([bad.status, bad.error], ['failed', 'HTTP 502']);
-    const refused = await resolveFile(fileRow({ remote_url: deadUrl }), { rootDir: s.root });
+    const refused = await resolveFile(fileRow({ remote_url: deadUrl }), { rootDir: s.root, fetchFn: localFetch });
     assert.equal(refused.status, 'failed');
     assert.match(refused.error, /lỗi mạng \(ECONNREFUSED\)/);
     assert.deepEqual(filesIn(s.root), []);
@@ -276,9 +282,23 @@ test('a download that stalls times out as failed and leaves nothing behind', asy
   const s = scratch();
   const srv = await server(() => { /* never answers */ });
   try {
-    const result = await resolveFile(fileRow({ remote_url: `${srv.base}/hang` }), { rootDir: s.root, stallMs: 150 });
+    const result = await resolveFile(fileRow({ remote_url: `${srv.base}/hang` }), { rootDir: s.root, fetchFn: localFetch, stallMs: 150 });
     assert.equal(result.status, 'failed');
     assert.match(result.error, /quá thời gian chờ/);
+    assert.deepEqual(filesIn(s.root), []);
+  } finally { await srv.close(); s.cleanup(); }
+});
+
+test('a link that points at this PC (127.0.0.1, e.g. Zalo\'s debug port) is refused before any request, by the default download', async () => {
+  const s = scratch();
+  const srv = await routeServer({ '/json/list': { type: 'application/pdf', body: PDF } });
+  try {
+    const result = await resolveFile(fileRow({ remote_url: `${srv.base}/json/list` }), { rootDir: s.root });
+    assert.equal(result.status, 'failed');
+    assert.match(result.error, /nội bộ 127\.0\.0\.1/);
+    assert.deepEqual(srv.hits, [], 'the local server is never contacted');
+    const named = await resolveFile(fileRow({ remote_url: 'http://localhost:9222/json/list' }), { rootDir: s.root });
+    assert.match(named.error, /localhost/);
     assert.deepEqual(filesIn(s.root), []);
   } finally { await srv.close(); s.cleanup(); }
 });
@@ -287,19 +307,19 @@ test('a download is checked against the advertised MD5, size and file signature'
   const s = scratch();
   const srv = await routeServer({ '/pdf2': { body: PDF2 }, '/text': { type: 'text/plain', body: 'Không phải PDF, đủ dài.' } });
   try {
-    const wrongMd5 = await resolveFile(fileRow({ remote_url: `${srv.base}/pdf2` }), { rootDir: s.root });
+    const wrongMd5 = await resolveFile(fileRow({ remote_url: `${srv.base}/pdf2` }), { rootDir: s.root, fetchFn: localFetch });
     assert.equal(wrongMd5.status, 'failed');
     assert.match(wrongMd5.error, /checksum MD5 không khớp/);
 
-    const wrongSize = await resolveFile(fileRow({ checksum: null, remote_url: `${srv.base}/pdf2` }), { rootDir: s.root });
+    const wrongSize = await resolveFile(fileRow({ checksum: null, remote_url: `${srv.base}/pdf2` }), { rootDir: s.root, fetchFn: localFetch });
     assert.equal(wrongSize.status, 'failed');
     assert.match(wrongSize.error, /kích thước/);
 
-    const wrongMagic = await resolveFile(fileRow({ checksum: null, size: null, remote_url: `${srv.base}/text` }), { rootDir: s.root });
+    const wrongMagic = await resolveFile(fileRow({ checksum: null, size: null, remote_url: `${srv.base}/text` }), { rootDir: s.root, fetchFn: localFetch });
     assert.equal(wrongMagic.status, 'failed');
     assert.match(wrongMagic.error, /không phải file \.pdf/);
 
-    const noChecksumOk = await resolveFile(fileRow({ checksum: null, size: PDF2.length, remote_url: `${srv.base}/pdf2` }), { rootDir: s.root });
+    const noChecksumOk = await resolveFile(fileRow({ checksum: null, size: PDF2.length, remote_url: `${srv.base}/pdf2` }), { rootDir: s.root, fetchFn: localFetch });
     assert.equal(noChecksumOk.status, 'stored', 'a real PDF of the advertised size passes without an MD5');
     assert.deepEqual(filesIn(s.root), ['2026-10-22_Báo cáo.pdf']);
   } finally { await srv.close(); s.cleanup(); }
@@ -309,7 +329,7 @@ test('a download larger than the limit is cut off while streaming and skipped', 
   const s = scratch();
   const srv = await server((req, res) => { res.writeHead(200, { 'content-type': 'application/pdf' }); res.write(Buffer.concat([Buffer.from('%PDF-'), Buffer.alloc(5000)])); res.end(Buffer.alloc(5000)); });
   try {
-    const result = await resolveFile(fileRow({ size: null, checksum: null, remote_url: `${srv.base}/big` }), { rootDir: s.root, maxBytes: 4000 });
+    const result = await resolveFile(fileRow({ size: null, checksum: null, remote_url: `${srv.base}/big` }), { rootDir: s.root, fetchFn: localFetch, maxBytes: 4000 });
     assert.equal(result.status, 'skipped');
     assert.match(result.error, /^quá /);
     assert.deepEqual(filesIn(s.root), []);
@@ -387,7 +407,7 @@ test('a localPath under the old ZaloPC root is found through remapLocalPath', as
     mkdirSync(join(appData, 'ZaloData', 'media', '149', 'ZaloDownloads', 'file'), { recursive: true });
     writeFileSync(join(appData, 'ZaloData', 'media', '149', 'ZaloDownloads', 'file', 'a.pdf'), PDF);
     seed(db, { msg_id: '1', raw: { localPath: 'C:\\Users\\x\\AppData\\Local\\ZaloPC\\149\\ZaloDownloads\\file\\a.pdf' } });
-    const summary = await resolveFiles(db, { rootDir: s.root, appData });
+    const summary = await resolveFiles(db, { rootDir: s.root, fetchFn: localFetch, statfs: plenty, appData });
     assert.equal(summary.stored, 1);
     assert.deepEqual(readFileSync(join(s.root, fileOf(db, '1').stored_path)), PDF);
   } finally { db.close(); s.cleanup(); }
@@ -551,7 +571,7 @@ test('zmi sync stores the new files at the end of the run, and a second sync doe
     mkdirSync(join(s.root, 'config'), { recursive: true });
     writeFileSync(s.configPath, JSON.stringify({ version: 1, groups: [{ convId: 'g1', name: 'Nhóm 1', tracked: true, note: '' }] }));
     const bridge = { async getMessages() { return [fileMessage('77', 'Tài liệu.pdf', `${srv.base}/f`)]; }, close() {} };
-    const options = { port: 9222, open: async () => bridge, configPath: s.configPath, dbPath: s.dbPath, fileOptions: { appData: join(s.root, 'Roaming') } };
+    const options = { port: 9222, open: async () => bridge, configPath: s.configPath, dbPath: s.dbPath, fileOptions: { appData: join(s.root, 'Roaming'), fetchFn: localFetch, statfs: plenty } };
 
     const first = await captured(() => syncCommand(options));
     assert.equal(first.code, 0, first.err);
@@ -583,7 +603,7 @@ test('zmi files works with Zalo closed, says so once, and --retry / --limit pick
     seed(db, { msg_id: '3', file_name: 'Ba.pdf', ts: TS + 3, remote_url: `${srv.base}/3` });
     db.close();
     const closed = async () => { throw new CdpError('PORT_CLOSED', 'đóng'); };
-    const run = opts => captured(() => filesCommand({ port: 9222, open: closed, dbPath: s.dbPath, fileOptions: { appData: join(s.root, 'Roaming') }, ...opts }));
+    const run = opts => captured(() => filesCommand({ port: 9222, open: closed, dbPath: s.dbPath, fileOptions: { appData: join(s.root, 'Roaming'), fetchFn: localFetch, statfs: plenty }, ...opts }));
 
     const first = await run({ limit: 2 });
     assert.equal(first.code, 0, first.err);

@@ -36,6 +36,7 @@ node zmi.mjs sync --groups g123,g456    # chỉ các nhóm này (convId trong co
 - Mỗi nhóm được ghi trong một transaction. Nhóm lỗi thì rollback, ghi vào `sync_runs.errors_json` rồi sang nhóm tiếp (mã thoát 1 ở cuối). Một tin hỏng chỉ bị bỏ qua và ghi lỗi, các tin còn lại vẫn vào.
 - Tin đã lưu mà sau đó bị thu hồi hoặc xóa: chỉ đổi `kind`/`msg_type`, giữ nguyên chữ, `raw_json` và mục tìm toàn văn (dữ liệu riêng trên máy, spec 6.4). Tin thu hồi gặp lần đầu thì lưu không có chữ.
 - Mỗi lần chạy ghi một dòng vào bảng `sync_runs` (số nhóm, tin mới, tin cập nhật, lỗi). Mỗi nhóm in một dòng, ví dụ `☀️ Future Energy Vietnam 🇻🇳: +12 tin mới, 1 cập nhật (2.698 tin trên máy)`, rồi dòng `Tổng`.
+- Cuối mỗi lần `sync`: lưu file đính kèm mới (như `zmi files`), rồi quét ảnh chụp màn hình mới (như `zmi images`) bằng chính kết nối Zalo đó, in dòng `Đã quét X ảnh: …`. Bước ảnh lỗi hay dừng giữa chừng chỉ in cảnh báo `⚠ …`, không đổi mã thoát của `sync`; chạy `node zmi.mjs images` sau để làm tiếp.
 
 ```
 node zmi.mjs files                  # lưu file đính kèm chưa xử lý (status trống)
@@ -46,7 +47,7 @@ node zmi.mjs files --limit 50       # chỉ 50 file (mới nhất trước)
 `zmi sync` gọi bước này ở cuối mỗi lần chạy cho các file mới; `zmi files` xử lý phần tồn đọng. `files` không cần Zalo mở: khi Zalo đóng, lệnh nói một lần rằng bỏ qua bảng `Media.File` của Zalo rồi vẫn chép file từ đường dẫn đã lưu trong tin và tải theo link. Mỗi file được thử theo thứ tự:
 
 1. **File đã có trên máy**: `localPath` trong tin (`raw_json`), rồi `localPath`/`folderPath` của dòng `Media.File` tương ứng (đọc qua cầu nối chỉ đọc; ghép theo `cliMsgId`, trùng thì chọn đúng người gửi rồi giờ gửi gần nhất). Đường dẫn cũ `...\ZaloPC\<uid>\ZaloDownloads\...` được đổi sang `%APPDATA%\ZaloData\media\<uid>\ZaloDownloads\...`. File được **chép**, không bao giờ di chuyển; thư mục (như `folderPath` của file zip đã giải nén) bị bỏ qua.
-2. **Tải theo `href`** bằng một `GET` thường (Node `fetch`, theo chuyển hướng, không cookie).
+2. **Tải theo `href`** bằng một `GET` thường (không cookie) qua bộ tải an toàn `lib/net.mjs`: chỉ máy chủ công cộng `http(s)`, theo tối đa 3 lần chuyển hướng và kiểm tra lại từng lần (xem phần An toàn). `href` do người gửi tin đặt nên không bao giờ được trỏ vào máy này.
 3. Không được thì ghi `status` và lý do vào `files.error`.
 
 | `status` | Nghĩa |
@@ -71,7 +72,7 @@ node zmi.mjs images --rescan        # quét lại mọi ảnh chụp màn hình,
 node zmi.mjs images --prune-photos  # không quét: xóa file đã lưu của ảnh không phải ảnh chụp màn hình, giữ chữ OCR
 ```
 
-`images` **chỉ quét ảnh có dáng ảnh chụp màn hình** (`shape_class` là `phone_screenshot` hoặc `desktop_screenshot`) và giữ lại ảnh nào có chữ để Claude đọc sau. **[Cong quyết]** Ảnh chụp bằng máy ảnh, ảnh AI, quảng cáo không đáng thời gian quét, nên mọi ảnh dáng khác (`photo`) không bao giờ được tải hay đọc chữ, kể cả với `--rescan`; chấp nhận rằng poster, bảng giá và ảnh chụp màn hình đã cắt có dáng khác cũng bị bỏ qua. **Cần Zalo đang mở ở chế độ thu thập**, vì bộ đọc chữ (OCR) và bộ giải mã ảnh JXL là của chính Zalo; Zalo đóng thì lệnh in hướng dẫn mở "Zalo (MI)", thoát mã 1 và không ghi gì. Chạy sau `sync`, **ít nhất mỗi tuần một lần**: link ảnh của Zalo chỉ sống khoảng 2 tuần (xem phần thử nghiệm bên dưới).
+`images` **chỉ quét ảnh có dáng ảnh chụp màn hình** (`shape_class` là `phone_screenshot` hoặc `desktop_screenshot`) và giữ lại ảnh nào có chữ để Claude đọc sau. **[Cong quyết]** Ảnh chụp bằng máy ảnh, ảnh AI, quảng cáo không đáng thời gian quét, nên mọi ảnh dáng khác (`photo`) không bao giờ được tải hay đọc chữ, kể cả với `--rescan`; chấp nhận rằng poster, bảng giá và ảnh chụp màn hình đã cắt có dáng khác cũng bị bỏ qua. **Cần Zalo đang mở ở chế độ thu thập**, vì bộ đọc chữ (OCR) và bộ giải mã ảnh JXL là của chính Zalo; Zalo đóng thì lệnh in hướng dẫn mở "Zalo (MI)", thoát mã 1 và không ghi gì. `zmi sync` tự chạy bước này ở cuối; `zmi images` dùng để làm phần tồn đọng hoặc quét lại. Link ảnh của Zalo chỉ sống khoảng 2 tuần (xem phần thử nghiệm bên dưới), nên chạy `sync` **ít nhất mỗi tuần một lần**.
 
 `--prune-photos` dọn kết quả của lần quét toàn bộ ảnh trước đây: với mỗi ảnh dáng `photo` đã có file trong `data/images/`, xóa file, đặt `stored_path` rỗng và `status = text_only`, giữ nguyên `ocr_text`, `has_text`, `text_score` (nên chữ trong ảnh vẫn tìm được). Chỉ xóa đường dẫn nằm trong `data/images/`, đường dẫn khác bị từ chối (thoát mã 1); file đã mất thì chỉ cập nhật database. Lệnh cũng dọn file tạm còn sót trong `data/images/.tmp/` của các lần chạy đã chết (mỗi lần quét cũng tự dọn khi bắt đầu). Không cần mở Zalo. Lần chạy thật: 2.189 file, giải phóng 724 MB.
 
@@ -87,7 +88,7 @@ Mỗi ảnh chụp màn hình được xử lý như sau:
 | `stored` | Có chữ, đã lưu ở `images.stored_path` (đường dẫn tính từ thư mục gốc repo, dấu `/`) |
 | `no_text` | Đã đọc, không đủ chữ; không lưu file |
 | `unavailable` | Không có trên máy và link đã hết hạn hoặc không tải được (lý do ở `images.error`, ví dụ `HTTP 404 (link đã hết hạn)`) |
-| `failed` | Lỗi khi giải mã hoặc đọc chữ, hay mạng chập chờn với ảnh còn mới (lý do ở `error`); lần chạy sau tự thử lại |
+| `failed` | Lỗi khi giải mã hoặc đọc chữ, hay mạng chập chờn với ảnh còn mới (lý do ở `error`); lần chạy sau tự thử lại, sau các ảnh chưa quét, tối đa 3 lần (`images.fail_count`), rồi chỉ `--rescan` mới thử lại |
 | `text_only` | Ảnh dáng `photo` đã quét trong lần quét toàn bộ ảnh trước đây; file đã xóa bằng `--prune-photos`, chỉ còn giữ chữ OCR |
 | (trống) | Chưa quét; với ảnh dáng `photo` là không bao giờ quét |
 
@@ -95,7 +96,7 @@ Mỗi ảnh chụp màn hình được xử lý như sau:
 - `shape_class` (`phone_screenshot`: ảnh dọc tỉ lệ ít nhất 1,9; `desktop_screenshot`: ảnh ngang gần 16:9 hoặc 16:10, rộng từ 1280; còn lại `photo`) được tính cho mọi ảnh ngay đầu lần chạy, từ kích thước đã lưu, và quyết định ảnh nào được quét.
 - **Thứ tự**: ảnh còn link (16 ngày gần nhất) trước, ảnh cũ nhất trước (ảnh sắp hết hạn link được quét trước); sau đó ảnh cũ hơn có trên máy; cuối cùng là phần còn lại (phần lớn sẽ là `unavailable`).
 - Chạy lại không làm lại gì: chỉ quét ảnh chụp màn hình chưa có `scanned_at` và ảnh `failed`. `--rescan` quét lại mọi ảnh chụp màn hình (ảnh đã lưu được đọc lại từ chính file đã lưu); `--rescan` không xóa file đã lưu.
-- Đồng thời 3 ảnh. Bảo vệ ổ đĩa như `files`: ổ chứa `data/` còn dưới 5 GB thì dừng, ảnh còn lại giữ nguyên, thoát mã 1. Mất kết nối với Zalo giữa chừng, hoặc 10 ảnh lỗi liên tiếp, thì dừng và báo; chạy lại là tiếp tục.
+- Đồng thời 3 ảnh. Bảo vệ ổ đĩa như `files`: ổ chứa `data/` còn dưới 5 GB thì dừng, ảnh còn lại giữ nguyên, thoát mã 1. Mất kết nối với Zalo giữa chừng, hoặc 10 ảnh chưa từng lỗi bị lỗi liên tiếp (dấu hiệu OCR hay bộ giải mã hỏng), thì dừng và báo; chạy lại là tiếp tục. Ảnh đã lỗi từ trước không tính vào ngưỡng này và luôn xếp sau, nên vài ảnh lỗi mãi không chặn được hàng đợi.
 - In tiến độ mỗi 25 ảnh, rồi `Đã quét X ảnh: Y có chữ (đã lưu), Z không có chữ, W không còn tải được, V lỗi`, thời gian và tốc độ (ảnh/giây), các lý do lỗi phổ biến nhất, và dòng trạng thái của các ảnh chụp màn hình (kèm số ảnh dáng khác không quét theo thiết kế).
 
 ## Thử nghiệm ảnh (bước 0 của Task 7)
@@ -155,7 +156,8 @@ Nhóm `☀️ Future Energy Vietnam 🇻🇳`, giai đoạn 22/09 đến 05/10/2
 | File | Vai trò |
 | --- | --- |
 | `zmi.mjs` | Điểm vào CLI, lệnh `doctor`, `groups`, `sync`, `files` và `images` |
-| `lib/images.mjs` | `shapeClass`, `textScore`/`hasText` (quyết định có chữ), `jpegVariantUrl`, `checkRemoteUrl`/`fetchImage` (tải an toàn), `scanImages` (phần tồn đọng của ảnh chụp màn hình: cache máy, link, giải mã, OCR, lưu; đồng thời 3 ảnh, bảo vệ ổ đĩa), `prunePhotoImages` (xóa file ảnh dáng `photo`, giữ chữ OCR), in kết quả |
+| `lib/net.mjs` | `guardedFetch` (tải chỉ từ máy chủ công cộng, kiểm địa chỉ lúc kết nối và ở mỗi lần chuyển hướng), `checkRemoteUrl`, `isPrivateAddress`; dùng chung cho `files` và `images` |
+| `lib/images.mjs` | `shapeClass`, `textScore`/`hasText` (quyết định có chữ), `jpegVariantUrl`, `fetchImage` (tải ảnh qua `guardedFetch`, giới hạn thời gian và dung lượng), `scanImages` (phần tồn đọng của ảnh chụp màn hình: cache máy, link, giải mã, OCR, lưu; đồng thời 3 ảnh, bảo vệ ổ đĩa), `prunePhotoImages` (xóa file ảnh dáng `photo`, giữ chữ OCR), in kết quả |
 | `lib/files.mjs` | `resolveFile` (một file: chép từ máy, tải theo link, kiểm tra), `resolveFiles` (phần tồn đọng, đồng thời 3 file, bảo vệ ổ đĩa), `remapLocalPath`, đặt tên file, in kết quả |
 | `lib/sync.mjs` | `syncGroup` (một nhóm: đọc Zalo, chuẩn hóa, ghi trong một transaction), `syncAll` (mọi nhóm, ghi `sync_runs`), chọn nhóm và in kết quả |
 | `lib/groups.mjs` | `suggestTracked`, gộp danh sách nhóm vào `config/groups.json`, in bảng nhóm |
@@ -168,6 +170,8 @@ Nhóm `☀️ Future Energy Vietnam 🇻🇳`, giai đoạn 22/09 đến 05/10/2
 Mọi lời gọi vào database của Zalo đi qua `readOnlyGuard`, chỉ cho phép `getAll`, `get`, `getMulti`, `count`. Gọi tên hàm khác thì ném lỗi ngay, cả ở phía Node lẫn trong trang Zalo (hai phía dùng chung một danh sách và một đoạn mã). Không gọi `insert`, `put`, `update`, `delete`, không gửi tin, không thao tác giao diện Zalo. `zmi files` đọc `Media.File` qua đúng cầu nối này và tải file bằng một `GET` thường từ Node; không gọi bộ tải của Zalo (`$zdownload`) và không ghi gì vào thư mục dữ liệu của Zalo (chỉ chép từ đó ra `data/files/`).
 
 `zmi images` dùng thêm một danh sách **riêng**, `COMPUTE_ALLOWLIST`, gồm đúng ba hàm chỉ tính toán của Zalo: `libjxl.decodeToJpeg` (byte JXL vào, byte JPEG ra), `ocr.recognize` (đọc chữ trong một file ảnh) và `ocr.isSupported`. Danh sách này cũng được kiểm ở cả hai phía như danh sách đọc kho; danh sách đọc kho không đổi (`getAll`, `get`, `getMulti`, `count`). OCR chỉ được đưa file tạm của zmi trong `data/images/.tmp/`: đường dẫn tương đối, có `..`, hay nằm trong `ZaloData`/`ZaloPC` bị từ chối ở cả hai phía. Ảnh trong cache Zalo do Node đọc rồi chép ra, không bao giờ đưa thẳng cho Zalo.
+
+**Tải từ mạng chỉ tới máy chủ công cộng** (`lib/net.mjs`, dùng cho cả link file lẫn link ảnh). Link nằm trong tin nhắn nên người gửi có thể trỏ nó vào chính máy này, ví dụ cổng debug của Zalo `127.0.0.1:9222`. Vì vậy chỉ tải `http(s)`; từ chối `localhost`, địa chỉ loopback, mạng riêng, link-local, CGNAT, dải thử nghiệm (198.18.0.0/15, 192.0.0.0/24), multicast và các dạng IPv6 tương ứng (kể cả `::ffff:127.0.0.1`, `::127.0.0.1`). Việc kiểm tra diễn ra **ngay lúc kết nối**: bộ tải tự phân giải tên máy chủ và chỉ kết nối tới địa chỉ đã kiểm, nên một tên miền đổi sang `127.0.0.1` sau lần kiểm đầu (DNS rebinding) cũng không lọt. Chuyển hướng được theo bằng tay, tối đa 3 lần, mỗi lần kiểm lại; `Location` hỏng thì coi như link chết.
 
 Dữ liệu (`data/`), bản xuất (`exports/`) và dữ liệu thô dùng cho test (`test/fixtures/raw/`) chứa nội dung chat thật nên đã nằm trong `.gitignore`. Không commit chúng.
 

@@ -239,12 +239,14 @@ export async function groupsCommand({ refresh = false, port, open = openBridge, 
 /**
  * zmi sync [--full] [--groups a,b]. Reads the tracked groups (config/groups.json) from Zalo, read-only, into the database.
  * Zalo is opened first and the database only after that succeeds, so a closed Zalo leaves data/ untouched.
- * After the messages are written, the files that were never tried (status NULL) are stored under data/files/.
- * `open`, `configPath`, `dbPath` and `fileOptions` (fetchFn, statfs, appData, ... for resolveFiles) are injectable so this can run
- * against a fake Zalo and a scratch directory.
+ * After the messages are written, the files that were never tried (status NULL) are stored under data/files/, then the
+ * screenshots not scanned yet are scanned with the same bridge (zmi images). The image step never changes the exit code:
+ * a failure or an early stop is reported as a warning (run zmi images again later).
+ * `open`, `configPath`, `dbPath`, `fileOptions` (fetchFn, statfs, appData, ... for resolveFiles) and `imageOptions` (the same for
+ * scanImages) are injectable so this can run against a fake Zalo and a scratch directory.
  * Exit code: 0 done, 1 something to fix first, a group failed or the file step stopped early, 2 bad --groups.
  */
-export async function syncCommand({ full = false, groups: requested, port, open = openBridge, configPath = GROUPS_CONFIG_PATH, dbPath = DB_PATH, fileOptions = {} }) {
+export async function syncCommand({ full = false, groups: requested, port, open = openBridge, configPath = GROUPS_CONFIG_PATH, dbPath = DB_PATH, fileOptions = {}, imageOptions = {} }) {
   let config;
   try {
     config = readGroupsConfig(configPath);
@@ -302,6 +304,8 @@ export async function syncCommand({ full = false, groups: requested, port, open 
       console.error(`Không lưu được file đính kèm: ${error.message}`);
       filesStopped = true;
     }
+
+    await scanScreenshotsAfterSync(db, { rootDir: rootDirOf(dbPath), bridge, ...imageOptions });
     return run.totals.failedGroups > 0 || filesStopped ? 1 : 0;
   } finally {
     bridge.close();
@@ -342,6 +346,17 @@ export async function filesCommand({ retry = false, limit, port, open = openBrid
   } finally {
     bridge?.close();
     db.close();
+  }
+}
+
+/** The image step at the end of zmi sync: scan the new screenshots, warn (never throw) when it fails or stops early. */
+async function scanScreenshotsAfterSync(db, options) {
+  try {
+    const summary = await scanAndReport(db, options);
+    if (summary.total === 0) console.log('Ảnh chụp màn hình: không có ảnh mới cần quét.');
+    if (summary.aborted || summary.diskStop) console.error('⚠ Quét ảnh chụp màn hình chưa xong; tin nhắn và file vẫn đã lưu. Chạy lại sau: node zmi.mjs images');
+  } catch (error) {
+    console.error(`⚠ Không quét được ảnh chụp màn hình: ${String(error?.message ?? error).split('\n')[0]}. Tin nhắn và file vẫn đã lưu; chạy lại sau: node zmi.mjs images`);
   }
 }
 
