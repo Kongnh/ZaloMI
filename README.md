@@ -11,7 +11,7 @@ Hiện có: kết nối CDP, cầu nối chỉ đọc, các lệnh `doctor`, `gr
 
 ## Skill `zalo-mi`: bản tin theo yêu cầu
 
-Trong **tab Code** của Claude Desktop, nhờ kiểu "tổng hợp các nhóm năng lượng 14 ngày qua", "có gì mới trong các nhóm Zalo tuần này", "ai mới vào nhóm đáng chú ý". Skill chạy `sync` (mở Zalo (MI) bằng script nếu cần), `export`, đọc từng nhóm (nhóm lớn giao cho subagent), mở có chọn lọc ảnh chụp màn hình và PDF liên quan, rồi lưu bản tin vào `C:\Users\kongn\Downloads\Zalo_MI_Report_<từ>_den_<đến>.md` và trả lời 5 đến 7 ý chính. Bản tin không ghi số điện thoại hay email cá nhân, mỗi ý có dẫn nguồn `(nhóm, ngày, người gửi, #m…)`, ý của Claude ghi "(Nhận định)".
+Trong **tab Code** của Claude Desktop, nhờ kiểu "tổng hợp các nhóm năng lượng 14 ngày qua", "có gì mới trong các nhóm Zalo tuần này", "ai mới vào nhóm đáng chú ý". Skill chạy `sync` (mở Zalo (MI) bằng script nếu cần), `export`, đọc từng nhóm (nhóm lớn giao cho subagent), mở có chọn lọc ảnh chụp màn hình và PDF liên quan, rồi lưu bản tin vào `C:\Users\kongn\OneDrive\Máy tính\New Topic\00. Market intel\Zalo_MI_Report_<từ>_den_<đến>.md` và trả lời 5 đến 7 ý chính. Bản tin không ghi số điện thoại hay email cá nhân, mỗi ý có dẫn nguồn `(nhóm, ngày, người gửi, #m…)`, ý của Claude ghi "(Nhận định)".
 
 Cài: bản gốc nằm trong repo ở `skills/zalo-mi/SKILL.md`; chép vào thư mục skill của người dùng (sửa xong thì chép lại):
 
