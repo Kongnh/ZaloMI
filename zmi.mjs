@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 // zmi: reads Zalo group messages from the running Zalo PC app into a private DB for market-intelligence reports.
-// Commands so far: doctor, groups, sync.
+// Commands so far: doctor, groups, sync, files.
 
 import './lib/suppress-sqlite-warning.mjs'; // before anything loads node:sqlite (see the dynamic import of lib/db.mjs below)
 import { parseArgs } from 'node:util';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { openBridge, BridgeError } from './lib/zalo-bridge.mjs';
 import { CdpError } from './lib/cdp.mjs';
 import {
   GroupsConfigError, mergeGroups, readGroupsConfig, writeGroupsConfig, saveGroupsToDb, readMemberCounts, formatGroupsTable,
 } from './lib/groups.mjs';
 import { syncAll, resolveTargets, storedCount, formatGroupLine, formatErrorLines, formatTotalLine, SyncUsageError } from './lib/sync.mjs';
+import { resolveAndReport, filesStatusLine } from './lib/files.mjs';
 
 // Dynamic on purpose. ESM loads a static `node:sqlite` import before any module body runs, so its ExperimentalWarning
 // would fire before the filter in suppress-sqlite-warning.mjs exists. Loaded here, the filter is already in place.
@@ -22,17 +23,24 @@ const DATA_DIR = join(import.meta.dirname, 'data');
 const DB_PATH = join(DATA_DIR, 'zalo-mi.db');
 const GROUPS_CONFIG_PATH = join(import.meta.dirname, 'config', 'groups.json');
 
+// Stored files live in <root>/data/files and stored_path is relative to <root>. data/ sits directly under the root,
+// so the root follows from the database path (tests point dbPath at a scratch directory and get a scratch root).
+const rootDirOf = dbPath => dirname(dirname(dbPath));
+
 const USAGE = `Cách dùng: node zmi.mjs <lệnh> [tùy chọn]
 
 Lệnh:
   doctor      Kiểm tra: cổng debug của Zalo, module database, đọc thử 1 tin, quyền ghi thư mục data/
   groups      Hiện danh sách nhóm và nhóm nào đang theo dõi (đọc từ config/groups.json, không cần mở Zalo)
-  sync        Đọc tin của các nhóm đang theo dõi từ Zalo (chỉ đọc) vào data/zalo-mi.db: lần đầu lấy hết lịch sử, các lần sau chỉ lấy tin mới
+  sync        Đọc tin của các nhóm đang theo dõi từ Zalo (chỉ đọc) vào data/zalo-mi.db: lần đầu lấy hết lịch sử, các lần sau chỉ lấy tin mới; cuối cùng lưu file đính kèm mới vào data/files/
+  files       Lưu file đính kèm chưa xử lý vào data/files/ (chép từ máy hoặc tải theo link); không cần mở Zalo
 
 Tùy chọn:
   --refresh   Với "groups": đọc lại danh sách nhóm từ Zalo (chỉ đọc), cập nhật database và config/groups.json
   --full      Với "sync": đọc lại toàn bộ lịch sử của mỗi nhóm thay vì chỉ tin mới
   --groups A,B  Với "sync": chỉ đồng bộ các nhóm này (convId cách nhau bằng dấu phẩy) thay vì mọi nhóm đang theo dõi
+  --retry     Với "files": thử lại cả file lỗi và file chỉ có link
+  --limit N   Với "files": chỉ xử lý N file (mới nhất trước)
   --port N    Cổng debug của Zalo (mặc định ${DEFAULT_PORT})
   -h, --help  Hiện hướng dẫn này
 `;
@@ -227,10 +235,12 @@ export async function groupsCommand({ refresh = false, port, open = openBridge, 
 /**
  * zmi sync [--full] [--groups a,b]. Reads the tracked groups (config/groups.json) from Zalo, read-only, into the database.
  * Zalo is opened first and the database only after that succeeds, so a closed Zalo leaves data/ untouched.
- * `open`, `configPath` and `dbPath` are injectable so this can run against a fake Zalo and a scratch directory.
- * Exit code: 0 done, 1 something to fix first or a group failed, 2 bad --groups.
+ * After the messages are written, the files that were never tried (status NULL) are stored under data/files/.
+ * `open`, `configPath`, `dbPath` and `fileOptions` (fetchFn, statfs, appData, ... for resolveFiles) are injectable so this can run
+ * against a fake Zalo and a scratch directory.
+ * Exit code: 0 done, 1 something to fix first, a group failed or the file step stopped early, 2 bad --groups.
  */
-export async function syncCommand({ full = false, groups: requested, port, open = openBridge, configPath = GROUPS_CONFIG_PATH, dbPath = DB_PATH }) {
+export async function syncCommand({ full = false, groups: requested, port, open = openBridge, configPath = GROUPS_CONFIG_PATH, dbPath = DB_PATH, fileOptions = {} }) {
   let config;
   try {
     config = readGroupsConfig(configPath);
@@ -279,17 +289,62 @@ export async function syncCommand({ full = false, groups: requested, port, open 
       },
     });
     console.log(formatTotalLine(run.totals, { seconds: (run.finishedAt - run.startedAt) / 1000 }));
-    return run.totals.failedGroups > 0 ? 1 : 0;
+
+    let filesStopped = false;
+    try {
+      const files = await resolveAndReport(db, { rootDir: rootDirOf(dbPath), bridge, ...fileOptions });
+      filesStopped = files.diskStop !== null;
+    } catch (error) {
+      console.error(`Không lưu được file đính kèm: ${error.message}`);
+      filesStopped = true;
+    }
+    return run.totals.failedGroups > 0 || filesStopped ? 1 : 0;
   } finally {
     bridge.close();
     db?.close();
   }
 }
 
+/**
+ * zmi files [--retry] [--limit N]. Stores the attached files that were never tried (status NULL); --retry also tries the
+ * failed and remote_only ones again. Zalo is optional: with it, the Media.File rows add more places to find a file on
+ * this PC; without it the paths kept in the messages and the links are still used.
+ * `open`, `dbPath` and `fileOptions` are injectable so this can run against a fake Zalo and a scratch directory.
+ * Exit code: 0 done, 1 no database / file step stopped early.
+ */
+export async function filesCommand({ retry = false, limit, port, open = openBridge, dbPath = DB_PATH, fileOptions = {} }) {
+  if (!existsSync(dbPath)) {
+    console.error('Chưa có database (data/zalo-mi.db). Hãy chạy trước: node zmi.mjs sync');
+    return 1;
+  }
+
+  let bridge = null;
+  try {
+    bridge = await open({ port });
+  } catch (error) {
+    const why = error instanceof CdpError && (error.code === 'PORT_CLOSED' || error.code === 'NO_TARGET')
+      ? 'Zalo không mở ở chế độ thu thập'
+      : `Không đọc được Zalo (${error.message.split('\n')[0]})`;
+    console.log(`${why}: bỏ qua bảng Media.File của Zalo, chỉ dùng đường dẫn đã lưu trong tin và tải theo link.`);
+  }
+  const db = openDb(dbPath);
+  try {
+    const summary = await resolveAndReport(db, {
+      rootDir: rootDirOf(dbPath), bridge, limit, statuses: retry ? [null, 'failed', 'remote_only'] : [null], ...fileOptions,
+    });
+    if (summary.total === 0) console.log(retry ? 'Không có file nào cần xử lý.' : 'Không có file nào cần xử lý (file lỗi hoặc chỉ có link thử lại bằng --retry).');
+    console.log(filesStatusLine(db));
+    return summary.diskStop ? 1 : 0;
+  } finally {
+    bridge?.close();
+    db.close();
+  }
+}
+
 async function main(argv) {
   let parsed;
   try {
-    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, refresh: { type: 'boolean' }, full: { type: 'boolean' }, groups: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
+    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, refresh: { type: 'boolean' }, full: { type: 'boolean' }, groups: { type: 'string' }, retry: { type: 'boolean' }, limit: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
   } catch (error) {
     console.error(`${error.message}\n\n${USAGE}`);
     return 2;
@@ -307,6 +362,19 @@ async function main(argv) {
     return 2;
   }
 
+  if ((values.retry || values.limit !== undefined) && command !== 'files') {
+    console.error(`--retry và --limit chỉ dùng với lệnh files.\n\n${USAGE}`);
+    return 2;
+  }
+  let limit;
+  if (values.limit !== undefined) {
+    limit = Number(values.limit);
+    if (!Number.isInteger(limit) || limit < 1) {
+      console.error(`--limit cần một số nguyên từ 1 trở lên, nhận được: "${values.limit}".\n\n${USAGE}`);
+      return 2;
+    }
+  }
+
   const port = values.port === undefined ? DEFAULT_PORT : Number(values.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     console.error(`Cổng không hợp lệ: "${values.port}".\n\n${USAGE}`);
@@ -320,6 +388,8 @@ async function main(argv) {
       return groupsCommand({ refresh: Boolean(values.refresh), port });
     case 'sync':
       return syncCommand({ full: Boolean(values.full), groups: values.groups, port });
+    case 'files':
+      return filesCommand({ retry: Boolean(values.retry), limit, port });
     default:
       console.error(`${command ? `Lệnh không biết: "${command}".` : 'Thiếu lệnh.'}\n\n${USAGE}`);
       return 2;
