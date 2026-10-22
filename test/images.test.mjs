@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   shapeClass, textScore, hasText, jpegVariantUrl, checkRemoteUrl, fetchImage, scanImages, formatImagesSummary, imagesStatusLine, MIN_TEXT_WORDS,
+  prunePhotoImages,
 } from '../lib/images.mjs';
 import { openDb } from '../lib/db.mjs';
 import { imagesCommand } from '../zmi.mjs';
@@ -74,8 +75,8 @@ const scratch = () => {
   return { root, appData, media, dbPath: join(root, 'data', 'zalo-mi.db'), cleanup: () => rmSync(root, { recursive: true, force: true }) };
 };
 
-/** Inserts a photo message and its images row the way sync does (no scan columns). */
-function seedImage(db, { msg_id, conv_id = 'g1', ts = NOW - DAY, width = 1200, height = 1000, remote_url = null, cache_path = null, from_uid = 'u1' }) {
+/** Inserts a photo message and its images row the way sync does (no scan columns). Screenshot-shaped unless told otherwise. */
+function seedImage(db, { msg_id, conv_id = 'g1', ts = NOW - DAY, width = 1080, height = 2340, remote_url = null, cache_path = null, from_uid = 'u1' }) {
   db.upsertMessage({ msg_id, conv_id, cli_msg_id: `c${msg_id}`, ts, from_uid, kind: 'photo', msg_type: 'chat.photo', raw_json: '{}' });
   db.upsertImage({ msg_id, conv_id, ts, sender_name: 'A', width, height, remote_url, cache_path });
 }
@@ -383,7 +384,7 @@ test('the disk guard stops before writing anything below the free-space floor an
   } finally { s.cleanup(); }
 });
 
-test('order: live links first (screenshots, then oldest first so the ones about to expire go before), then cached old images, then the rest', async () => {
+test('order: live links first, oldest first (the next to expire go before), then cached old images, then the rest', async () => {
   const s = scratch();
   try {
     const db = openDb(s.dbPath);
@@ -391,16 +392,42 @@ test('order: live links first (screenshots, then oldest first so the ones about 
     seedImage(db, { msg_id: 'old-nocache', ts: NOW - 60 * DAY, remote_url: link('a') });
     seedImage(db, { msg_id: 'old-cached', ts: NOW - 90 * DAY });
     seedImage(db, { msg_id: 'recent-new', ts: NOW - 1 * DAY, remote_url: link('b') });
-    seedImage(db, { msg_id: 'recent-old', ts: NOW - 14 * DAY, remote_url: link('c') });
-    seedImage(db, { msg_id: 'recent-shot', ts: NOW - 2 * DAY, width: 1080, height: 2340, remote_url: link('d') });
+    seedImage(db, { msg_id: 'recent-old', ts: NOW - 14 * DAY, remote_url: link('c'), width: 1920, height: 1080 });
     cachePicture(s, 'g1', 'old-cached', 'jpg', jpeg('photo'));
-    const fetchFn = fakeFetch(Object.fromEntries(['b', 'c', 'd'].map(id => [link(id), { body: jpeg('photo') }])));
+    const fetchFn = fakeFetch(Object.fromEntries(['b', 'c'].map(id => [link(id), { body: jpeg('photo') }])));
     const order = [];
     await scanImages(db, options(s, { bridge: fakeBridge(), fetchFn, concurrency: 1, onProgress: e => { if (e.type === 'image') order.push(e.row.msg_id); } }));
-    assert.deepEqual(order, ['recent-shot', 'recent-old', 'recent-new', 'old-cached', 'old-nocache']);
+    assert.deepEqual(order, ['recent-old', 'recent-new', 'old-cached', 'old-nocache']);
 
     const s2 = await scanImages(db, options(s, { bridge: fakeBridge(), fetchFn, rescan: true, limit: 2, concurrency: 1 }));
     assert.equal(s2.total, 2, '--limit caps the run after ordering');
+    db.close();
+  } finally { s.cleanup(); }
+});
+
+test('only screenshot-shaped images are scanned: photo-shaped ones are never fetched or OCRed, not even with --rescan', async () => {
+  const s = scratch();
+  try {
+    const db = openDb(s.dbPath);
+    const link = id => `https://b-f64-zpg-r.zdn.vn/55/${id}.jpg`;
+    seedImage(db, { msg_id: 'shot', remote_url: link('shot') });
+    seedImage(db, { msg_id: 'camera', width: 4032, height: 3024, remote_url: link('camera') });
+    seedImage(db, { msg_id: 'square', width: 1254, height: 1254, remote_url: link('square') });
+    cachePicture(s, 'g1', 'camera', 'jpg', jpeg('poster'));
+    const fetchFn = fakeFetch(Object.fromEntries(['shot', 'camera', 'square'].map(id => [link(id), { body: jpeg('poster') }])));
+    const bridge = fakeBridge();
+
+    for (const rescan of [false, true]) {
+      const summary = await scanImages(db, options(s, { bridge, fetchFn, rescan }));
+      assert.equal(summary.total, 1, `rescan ${rescan}`);
+    }
+    assert.deepEqual(fetchFn.hits, [link('shot')], 'the photo-shaped rows are never downloaded');
+    assert.equal(bridge.calls.ocr.length, 2, 'only the screenshot is OCRed (once per run)');
+    assert.deepEqual(stored(s), ['shot.jpg']);
+    for (const id of ['camera', 'square']) {
+      const r = row(db, id);
+      assert.deepEqual([r.shape_class, r.status, r.scanned_at, r.ocr_text], ['photo', null, null, null], id);
+    }
     db.close();
   } finally { s.cleanup(); }
 });
@@ -411,9 +438,96 @@ test('shape_class is filled for every row up front, also for rows the run does n
     const db = openDb(s.dbPath);
     seedImage(db, { msg_id: '1', width: 1920, height: 1080, ts: NOW - DAY });
     seedImage(db, { msg_id: '2', width: 1080, height: 2340, ts: NOW - 2 * DAY });
+    seedImage(db, { msg_id: '3', width: 1200, height: 1000, ts: NOW - 3 * DAY });
     await scanImages(db, options(s, { bridge: fakeBridge(), limit: 1 }));
     assert.equal(row(db, '1').shape_class, 'desktop_screenshot');
     assert.equal(row(db, '2').shape_class, 'phone_screenshot');
+    assert.equal(row(db, '3').shape_class, 'photo');
+    db.close();
+  } finally { s.cleanup(); }
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// prunePhotoImages
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** A row as an earlier (all-images) scan left it: stored file on disk, OCR text in the row and in search. */
+function seedStored(db, s, { msg_id, width, height, conv_id = 'g1', stored_path = `data/images/${conv_id}/${msg_id}.jpg`, bytes = 1000, writeFile = true }) {
+  seedImage(db, { msg_id, conv_id, width, height });
+  db.upsertImage({ msg_id, shape_class: shapeClass(width, height), status: 'stored', has_text: 1, text_score: textScore(POSTER), ocr_text: POSTER, stored_path, scanned_at: NOW });
+  if (writeFile) {
+    mkdirSync(join(s.root, 'data', 'images', conv_id), { recursive: true });
+    writeFileSync(join(s.root, stored_path), Buffer.alloc(bytes, 1));
+  }
+}
+
+test('prunePhotoImages deletes the files of photo-shaped images, keeps their OCR text and search, and leaves screenshots alone', () => {
+  const s = scratch();
+  try {
+    const db = openDb(s.dbPath);
+    seedStored(db, s, { msg_id: 'p1', width: 4032, height: 3024, bytes: 3 * 1024 * 1024 });
+    seedStored(db, s, { msg_id: 'p2', width: 1254, height: 1254, bytes: 1024 * 1024 });
+    seedStored(db, s, { msg_id: 'gone', width: 1200, height: 1000, writeFile: false }); // file already missing: fine
+    seedStored(db, s, { msg_id: 'shot', width: 1080, height: 2340 });
+    seedImage(db, { msg_id: 'p-notext', width: 1200, height: 1000 });
+    db.upsertImage({ msg_id: 'p-notext', shape_class: 'photo', status: 'no_text', has_text: 0, scanned_at: NOW });
+
+    const result = prunePhotoImages(db, { rootDir: s.root });
+    assert.equal(result.pruned, 3);
+    assert.equal(result.missing, 1);
+    assert.equal(result.bytesFreed, 4 * 1024 * 1024);
+    assert.deepEqual(result.refused, []);
+    assert.deepEqual(stored(s), ['shot.jpg']);
+
+    for (const id of ['p1', 'p2', 'gone']) {
+      const r = row(db, id);
+      assert.deepEqual([r.status, r.stored_path, r.has_text, r.text_score, r.ocr_text], ['text_only', null, 1, textScore(POSTER), POSTER], id);
+    }
+    assert.equal(row(db, 'shot').status, 'stored');
+    assert.equal(row(db, 'p-notext').status, 'no_text');
+    assert.deepEqual(db.search('hoi thao mai nha').map(r => r.msg_id).sort(), ['gone', 'p1', 'p2', 'shot'], 'OCR text stays searchable');
+
+    const again = prunePhotoImages(db, { rootDir: s.root });
+    assert.equal(again.pruned, 0, 'a second prune finds nothing');
+    db.close();
+  } finally { s.cleanup(); }
+});
+
+test('prunePhotoImages refuses any stored_path that does not resolve inside data/images/', () => {
+  const s = scratch();
+  try {
+    const db = openDb(s.dbPath);
+    mkdirSync(join(s.root, 'data', 'files', 'g1'), { recursive: true });
+    writeFileSync(join(s.root, 'data', 'files', 'g1', 'keep.pdf'), 'pdf');
+    writeFileSync(join(s.root, 'outside.jpg'), 'x');
+    seedStored(db, s, { msg_id: 'a', width: 1200, height: 1000, stored_path: 'data/files/g1/keep.pdf', writeFile: false });
+    seedStored(db, s, { msg_id: 'b', width: 1200, height: 1000, stored_path: 'data/images/../../outside.jpg', writeFile: false });
+    seedStored(db, s, { msg_id: 'c', width: 1200, height: 1000, stored_path: join(s.root, 'outside.jpg'), writeFile: false });
+    seedStored(db, s, { msg_id: 'd', width: 1200, height: 1000, stored_path: 'data/images', writeFile: false });
+
+    const result = prunePhotoImages(db, { rootDir: s.root });
+    assert.equal(result.pruned, 0);
+    assert.deepEqual(result.refused.sort(), ['a', 'b', 'c', 'd']);
+    assert.ok(existsSync(join(s.root, 'data', 'files', 'g1', 'keep.pdf')));
+    assert.ok(existsSync(join(s.root, 'outside.jpg')));
+    for (const id of ['a', 'b', 'c', 'd']) assert.equal(row(db, id).status, 'stored', `${id} untouched`);
+    db.close();
+  } finally { s.cleanup(); }
+});
+
+test('prunePhotoImages sweeps temp files left in data/images/.tmp by runs that are no longer alive, but not a live run\'s', () => {
+  const s = scratch();
+  try {
+    const db = openDb(s.dbPath);
+    const tmp = join(s.root, 'data', 'images', '.tmp');
+    mkdirSync(tmp, { recursive: true });
+    writeFileSync(join(tmp, '8390985879812-999999999.jpg'), Buffer.alloc(2048)); // a pid that does not exist
+    writeFileSync(join(tmp, `123-${process.pid}.jpg`), 'live'); // this process: alive
+    writeFileSync(join(tmp, 'notes.txt'), 'not ours');
+    const result = prunePhotoImages(db, { rootDir: s.root });
+    assert.equal(result.tempFiles, 1);
+    assert.equal(result.tempBytes, 2048);
+    assert.deepEqual(readdirSync(tmp).sort(), [`123-${process.pid}.jpg`, 'notes.txt']);
     db.close();
   } finally { s.cleanup(); }
 });
@@ -448,8 +562,15 @@ test('formatImagesSummary and imagesStatusLine are Vietnamese', () => {
   const db = openDb(':memory:');
   seedImage(db, { msg_id: '1' });
   seedImage(db, { msg_id: '2' });
-  db.upsertImage({ msg_id: '2', status: 'stored', has_text: 1, scanned_at: 1 });
-  assert.equal(imagesStatusLine(db), 'Trạng thái ảnh trong database: 1 có chữ (đã lưu), 0 không có chữ, 0 không còn tải được, 0 lỗi, 1 chưa quét');
+  seedImage(db, { msg_id: '3', width: 1200, height: 1000 });
+  seedImage(db, { msg_id: '4', width: 1200, height: 1000 });
+  db.upsertImage({ msg_id: '1', shape_class: 'phone_screenshot' });
+  db.upsertImage({ msg_id: '2', shape_class: 'phone_screenshot', status: 'stored', has_text: 1, scanned_at: 1 });
+  db.upsertImage({ msg_id: '3', shape_class: 'photo' });
+  db.upsertImage({ msg_id: '4', shape_class: 'photo', status: 'text_only', has_text: 1 });
+  assert.equal(imagesStatusLine(db),
+    'Trạng thái ảnh chụp màn hình trong database: 1 có chữ (đã lưu), 0 không có chữ, 0 không còn tải được, 0 lỗi, 1 chưa quét. ' +
+    '2 ảnh khác (không có dáng ảnh chụp màn hình) không quét, theo thiết kế; 1 ảnh trong số đó chỉ còn giữ chữ OCR.');
   db.close();
 });
 
@@ -491,7 +612,7 @@ test('zmi images scans with Zalo open, prints progress and the summary, and a se
 
     const second = await run({});
     assert.match(second.out, /Không có ảnh nào cần quét/);
-    assert.match(second.out, /Trạng thái ảnh trong database: 1 có chữ \(đã lưu\), 1 không có chữ/);
+    assert.match(second.out, /Trạng thái ảnh chụp màn hình trong database: 1 có chữ \(đã lưu\), 1 không có chữ/);
 
     const rescan = await run({ rescan: true, limit: 1 });
     assert.match(rescan.out, /Đã quét 1 ảnh/);
@@ -523,9 +644,30 @@ test('zmi images without a database says to run sync first and does not open Zal
   } finally { s.cleanup(); }
 });
 
+test('zmi images --prune-photos works without Zalo, scans nothing, and prints what it freed', async () => {
+  const s = scratch();
+  try {
+    const db = openDb(s.dbPath);
+    seedStored(db, s, { msg_id: 'p1', width: 4032, height: 3024, bytes: 2 * 1024 * 1024 });
+    seedStored(db, s, { msg_id: 'shot', width: 1080, height: 2340 });
+    seedImage(db, { msg_id: 'pending-shot' });
+    db.close();
+    const r = await captured(() => imagesCommand({ port: 9222, prunePhotos: true, open: async () => { throw new Error('should not open Zalo'); }, dbPath: s.dbPath }));
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /Đã xóa 1 file ảnh không phải ảnh chụp màn hình \(2 MB\)/);
+    assert.match(r.out, /giữ nguyên chữ OCR/);
+    assert.deepEqual(stored(s), ['shot.jpg']);
+    const after = openDb(s.dbPath);
+    assert.equal(row(after, 'pending-shot').scanned_at, null, 'no scan ran');
+    assert.equal(row(after, 'p1').status, 'text_only');
+    after.close();
+  } finally { s.cleanup(); }
+});
+
 test('--rescan belongs to images, and --limit is accepted for images and files only', () => {
   const run = (...args) => spawnSync(process.execPath, ['--no-warnings', join(import.meta.dirname, '..', 'zmi.mjs'), ...args], { encoding: 'utf8' });
-  for (const args of [['files', '--rescan'], ['sync', '--rescan'], ['images', '--limit', '0'], ['images', '--retry'], ['groups', '--limit', '3']]) {
+  for (const args of [['files', '--rescan'], ['sync', '--rescan'], ['images', '--limit', '0'], ['images', '--retry'], ['groups', '--limit', '3'],
+    ['files', '--prune-photos'], ['images', '--prune-photos', '--rescan'], ['images', '--prune-photos', '--limit', '5']]) {
     assert.equal(run(...args).status, 2, args.join(' '));
   }
   assert.match(run('--help').stdout, /images/);

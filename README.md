@@ -2,7 +2,7 @@
 
 Công cụ dòng lệnh `zmi` (Node 24) đọc tin nhắn nhóm Zalo từ ứng dụng Zalo PC đang chạy, qua Chrome DevTools Protocol, để đưa vào một database SQLite riêng phục vụ báo cáo market intelligence theo yêu cầu. Thiết kế đầy đủ: `Thiết kế hệ thống Zalo MI.md`. Kết quả thử nghiệm đọc dữ liệu: `Kết quả thử nghiệm đọc dữ liệu Zalo PC.md`.
 
-Hiện có: kết nối CDP, cầu nối chỉ đọc, các lệnh `doctor`, `groups`, `sync` (lấy tin của các nhóm theo dõi vào database), `files` (lưu file đính kèm vào `data/files/`) và `images` (quét chữ trong ảnh, lưu ảnh có chữ vào `data/images/`). Chưa có `export` và `search`.
+Hiện có: kết nối CDP, cầu nối chỉ đọc, các lệnh `doctor`, `groups`, `sync` (lấy tin của các nhóm theo dõi vào database), `files` (lưu file đính kèm vào `data/files/`) và `images` (quét chữ trong ảnh chụp màn hình, lưu ảnh có chữ vào `data/images/`). Chưa có `export` và `search`.
 
 ## Yêu cầu
 
@@ -65,14 +65,17 @@ node zmi.mjs files --limit 50       # chỉ 50 file (mới nhất trước)
 **Link file của Zalo chỉ sống vài tuần (thường 1-3 tuần)** (xem phần thử nghiệm bên dưới). Vì vậy file chỉ được lưu đầy đủ nếu `zmi sync` chạy đều đặn (ít nhất mỗi tuần một lần, tốt nhất mỗi ngày): file cũ hơn thế chỉ còn nếu đã có sẵn trên máy (đã tải bằng Zalo, hoặc do chính Cong gửi từ máy mình).
 
 ```
-node zmi.mjs images                 # quét các ảnh chưa quét (và ảnh lỗi lần trước)
+node zmi.mjs images                 # quét các ảnh chụp màn hình chưa quét (và ảnh lỗi lần trước)
 node zmi.mjs images --limit 300     # chỉ 300 ảnh, theo thứ tự ưu tiên
-node zmi.mjs images --rescan        # quét lại mọi ảnh, kể cả ảnh đã quét
+node zmi.mjs images --rescan        # quét lại mọi ảnh chụp màn hình, kể cả ảnh đã quét
+node zmi.mjs images --prune-photos  # không quét: xóa file đã lưu của ảnh không phải ảnh chụp màn hình, giữ chữ OCR
 ```
 
-`images` tìm chữ trong mọi ảnh của các nhóm theo dõi (không chỉ ảnh chụp màn hình), giữ lại ảnh có chữ (ảnh chụp màn hình, poster sự kiện, ảnh chụp văn bản hoặc bảng giá, infographic, slide) để Claude đọc sau, và bỏ ảnh không có chữ (ảnh người, phong cảnh, sản phẩm không có chữ). **Cần Zalo đang mở ở chế độ thu thập**, vì bộ đọc chữ (OCR) và bộ giải mã ảnh JXL là của chính Zalo; Zalo đóng thì lệnh in hướng dẫn mở "Zalo (MI)", thoát mã 1 và không ghi gì. Chạy sau `sync`, **ít nhất mỗi tuần một lần**: link ảnh của Zalo chỉ sống khoảng 2 tuần (xem phần thử nghiệm bên dưới).
+`images` **chỉ quét ảnh có dáng ảnh chụp màn hình** (`shape_class` là `phone_screenshot` hoặc `desktop_screenshot`) và giữ lại ảnh nào có chữ để Claude đọc sau. **[Cong quyết]** Ảnh chụp bằng máy ảnh, ảnh AI, quảng cáo không đáng thời gian quét, nên mọi ảnh dáng khác (`photo`) không bao giờ được tải hay đọc chữ, kể cả với `--rescan`; chấp nhận rằng poster, bảng giá và ảnh chụp màn hình đã cắt có dáng khác cũng bị bỏ qua. **Cần Zalo đang mở ở chế độ thu thập**, vì bộ đọc chữ (OCR) và bộ giải mã ảnh JXL là của chính Zalo; Zalo đóng thì lệnh in hướng dẫn mở "Zalo (MI)", thoát mã 1 và không ghi gì. Chạy sau `sync`, **ít nhất mỗi tuần một lần**: link ảnh của Zalo chỉ sống khoảng 2 tuần (xem phần thử nghiệm bên dưới).
 
-Mỗi ảnh được xử lý như sau:
+`--prune-photos` dọn kết quả của lần quét toàn bộ ảnh trước đây: với mỗi ảnh dáng `photo` đã có file trong `data/images/`, xóa file, đặt `stored_path` rỗng và `status = text_only`, giữ nguyên `ocr_text`, `has_text`, `text_score` (nên chữ trong ảnh vẫn tìm được). Chỉ xóa đường dẫn nằm trong `data/images/`, đường dẫn khác bị từ chối (thoát mã 1); file đã mất thì chỉ cập nhật database. Lệnh cũng dọn file tạm còn sót trong `data/images/.tmp/` của các lần chạy đã chết (mỗi lần quét cũng tự dọn khi bắt đầu). Không cần mở Zalo. Lần chạy thật: 2.189 file, giải phóng 724 MB.
+
+Mỗi ảnh chụp màn hình được xử lý như sau:
 
 1. **Lấy ảnh**: trước hết từ cache ảnh của Zalo trên máy (chỉ đọc): `picture\<convId bỏ chữ g>_group\z<msgId>_<mã>.<đuôi>`, `resource\<convId>\picture\<cliMsgId>_<fromUid>_<convId>_<mã>.<đuôi>` trong `%APPDATA%\ZaloData\media\<uid>\ZaloDownloads\`, và `localPath` của tin (đổi gốc cũ như với file). Có bản `.jpg`/`.png` thì dùng luôn, chỉ có `.jxl` thì nhờ bộ giải mã JXL của Zalo đổi sang JPEG. Không có trên máy thì tải theo link (`hdUrl`): với link JXL của Zalo, xin bản JPEG ở cùng đường dẫn (`/jxl/…/x.jxl` thành `/jpg/…/x.jpg`), không được mới tải link gốc. Chỉ tải `http(s)` từ máy chủ công cộng (từ chối localhost và địa chỉ nội bộ, kiểm tra lại ở mỗi lần chuyển hướng), tối đa 20 MB, chờ tối đa 30 giây.
 2. **Đọc chữ** bằng OCR của Zalo trên một file tạm của zmi (`data/images/.tmp/`), không bao giờ trên file trong thư mục Zalo.
@@ -85,13 +88,15 @@ Mỗi ảnh được xử lý như sau:
 | `no_text` | Đã đọc, không đủ chữ; không lưu file |
 | `unavailable` | Không có trên máy và link đã hết hạn hoặc không tải được (lý do ở `images.error`, ví dụ `HTTP 404 (link đã hết hạn)`) |
 | `failed` | Lỗi khi giải mã hoặc đọc chữ, hay mạng chập chờn với ảnh còn mới (lý do ở `error`); lần chạy sau tự thử lại |
+| `text_only` | Ảnh dáng `photo` đã quét trong lần quét toàn bộ ảnh trước đây; file đã xóa bằng `--prune-photos`, chỉ còn giữ chữ OCR |
+| (trống) | Chưa quét; với ảnh dáng `photo` là không bao giờ quét |
 
 - Mỗi ảnh ghi `shape_class`, `status`, `has_text` (1/0), `text_score` (số từ), `ocr_text` (các dòng chữ OCR đọc được, cả khi không đủ để lưu ảnh), `stored_path`, `scanned_at`, `error`. `ocr_text` được đưa vào tìm kiếm toàn văn cùng tin nhắn, không phân biệt dấu.
-- `shape_class` (`phone_screenshot`: ảnh dọc tỉ lệ ít nhất 1,9; `desktop_screenshot`: ảnh ngang gần 16:9 hoặc 16:10, rộng từ 1280; còn lại `photo`) được tính cho mọi ảnh ngay đầu lần chạy, từ kích thước đã lưu.
-- **Thứ tự**: ảnh còn link (16 ngày gần nhất) trước, trong đó ảnh có dáng ảnh chụp màn hình trước, rồi đến ảnh cũ nhất trước (ảnh sắp hết hạn link được quét trước); sau đó ảnh cũ hơn có trên máy; cuối cùng là phần còn lại (phần lớn sẽ là `unavailable`).
-- Chạy lại không làm lại gì: chỉ quét ảnh chưa có `scanned_at` và ảnh `failed`. `--rescan` quét lại tất cả (ảnh đã lưu được đọc lại từ chính file đã lưu); `--rescan` không xóa file đã lưu.
+- `shape_class` (`phone_screenshot`: ảnh dọc tỉ lệ ít nhất 1,9; `desktop_screenshot`: ảnh ngang gần 16:9 hoặc 16:10, rộng từ 1280; còn lại `photo`) được tính cho mọi ảnh ngay đầu lần chạy, từ kích thước đã lưu, và quyết định ảnh nào được quét.
+- **Thứ tự**: ảnh còn link (16 ngày gần nhất) trước, ảnh cũ nhất trước (ảnh sắp hết hạn link được quét trước); sau đó ảnh cũ hơn có trên máy; cuối cùng là phần còn lại (phần lớn sẽ là `unavailable`).
+- Chạy lại không làm lại gì: chỉ quét ảnh chụp màn hình chưa có `scanned_at` và ảnh `failed`. `--rescan` quét lại mọi ảnh chụp màn hình (ảnh đã lưu được đọc lại từ chính file đã lưu); `--rescan` không xóa file đã lưu.
 - Đồng thời 3 ảnh. Bảo vệ ổ đĩa như `files`: ổ chứa `data/` còn dưới 5 GB thì dừng, ảnh còn lại giữ nguyên, thoát mã 1. Mất kết nối với Zalo giữa chừng, hoặc 10 ảnh lỗi liên tiếp, thì dừng và báo; chạy lại là tiếp tục.
-- In tiến độ mỗi 25 ảnh, rồi `Đã quét X ảnh: Y có chữ (đã lưu), Z không có chữ, W không còn tải được, V lỗi`, thời gian và tốc độ (ảnh/giây), các lý do lỗi phổ biến nhất, và dòng trạng thái của toàn bộ bảng ảnh.
+- In tiến độ mỗi 25 ảnh, rồi `Đã quét X ảnh: Y có chữ (đã lưu), Z không có chữ, W không còn tải được, V lỗi`, thời gian và tốc độ (ảnh/giây), các lý do lỗi phổ biến nhất, và dòng trạng thái của các ảnh chụp màn hình (kèm số ảnh dáng khác không quét theo thiết kế).
 
 ## Thử nghiệm ảnh (bước 0 của Task 7)
 
@@ -108,6 +113,8 @@ Mỗi ảnh được xử lý như sau:
 **Cache ảnh trên máy.** Tên file trong `picture\<convId bỏ g>_group\` có dạng `z<msgId>_<mã băm>.jxl|.jpg`, trong `resource\<convId>\picture\` có dạng `<cliMsgId>_<fromUid>_<convId>_<mã băm>.jxl|.jpg` (cùng mã băm cho cùng một ảnh), nên ghép được với tin theo `msgId`, hoặc theo `cliMsgId` + người gửi. Nhóm thử có 337/339 ảnh trong cache; toàn bộ 28 nhóm có 2.435/10.010. Ảnh trong cache có kích thước như ảnh Zalo lưu (9/11 ảnh thử khớp `width`/`height`; 2 ảnh 4032×3024 được Zalo thu nhỏ còn 2568×1926).
 
 ## Kiểm thử mẫu ảnh (bước 5 của Task 7)
+
+*Phép đo dưới đây làm khi `images` còn quét mọi ảnh. Từ sau quyết định chỉ quét ảnh chụp màn hình, nó vẫn đúng cho cách quyết định "có chữ" trên ảnh được quét, nhưng phần lớn ảnh trong mẫu (ảnh dáng `photo`) nay không còn được quét.*
 
 54 ảnh thật của nhóm thử `g8318398124727869839` (chọn ngẫu nhiên trong 337 ảnh có trên máy), xem từng ảnh và gán nhãn tay: 42 ảnh có chữ (slide, biểu đồ, văn bản, bảng giá, ảnh chụp màn hình, thiệp có chữ, 6 ảnh poster, thư mời hoặc băng rôn sự kiện), 12 ảnh không có chữ (ảnh flycam, ảnh người, ảnh sản phẩm, ảnh bản đồ vệ tinh). So với quyết định của hệ thống (cùng OCR của Zalo, cùng cách ghép dòng, cùng ngưỡng; chạy trong bước thử nghiệm vì lần chạy thật bị dừng trước khi tới các ảnh cũ này):
 
@@ -148,7 +155,7 @@ Nhóm `☀️ Future Energy Vietnam 🇻🇳`, giai đoạn 22/09 đến 05/10/2
 | File | Vai trò |
 | --- | --- |
 | `zmi.mjs` | Điểm vào CLI, lệnh `doctor`, `groups`, `sync`, `files` và `images` |
-| `lib/images.mjs` | `shapeClass`, `textScore`/`hasText` (quyết định có chữ), `jpegVariantUrl`, `checkRemoteUrl`/`fetchImage` (tải an toàn), `scanImages` (phần tồn đọng: cache máy, link, giải mã, OCR, lưu; đồng thời 3 ảnh, bảo vệ ổ đĩa), in kết quả |
+| `lib/images.mjs` | `shapeClass`, `textScore`/`hasText` (quyết định có chữ), `jpegVariantUrl`, `checkRemoteUrl`/`fetchImage` (tải an toàn), `scanImages` (phần tồn đọng của ảnh chụp màn hình: cache máy, link, giải mã, OCR, lưu; đồng thời 3 ảnh, bảo vệ ổ đĩa), `prunePhotoImages` (xóa file ảnh dáng `photo`, giữ chữ OCR), in kết quả |
 | `lib/files.mjs` | `resolveFile` (một file: chép từ máy, tải theo link, kiểm tra), `resolveFiles` (phần tồn đọng, đồng thời 3 file, bảo vệ ổ đĩa), `remapLocalPath`, đặt tên file, in kết quả |
 | `lib/sync.mjs` | `syncGroup` (một nhóm: đọc Zalo, chuẩn hóa, ghi trong một transaction), `syncAll` (mọi nhóm, ghi `sync_runs`), chọn nhóm và in kết quả |
 | `lib/groups.mjs` | `suggestTracked`, gộp danh sách nhóm vào `config/groups.json`, in bảng nhóm |
