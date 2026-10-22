@@ -9,6 +9,18 @@ Hiện có: kết nối CDP, cầu nối chỉ đọc, các lệnh `doctor`, `gr
 - Windows, Node 24 trở lên.
 - Zalo PC đang mở **kèm cờ** `--remote-debugging-port=9222` (lối tắt "Zalo (MI)", xem bên dưới). Phải thoát hẳn Zalo trước khi mở lại, nếu không Zalo đang chạy sẽ bỏ qua cờ này. Cổng chỉ mở ở `127.0.0.1`. Chỉ `doctor`, `groups --refresh`, `sync` và `images` cần Zalo mở; `files`, `export`, `search` thì không.
 
+## Skill `zalo-mi`: bản tin theo yêu cầu
+
+Trong **tab Code** của Claude Desktop, nhờ kiểu "tổng hợp các nhóm năng lượng 14 ngày qua", "có gì mới trong các nhóm Zalo tuần này", "ai mới vào nhóm đáng chú ý". Skill chạy `sync` (mở Zalo (MI) bằng script nếu cần), `export`, đọc từng nhóm (nhóm lớn giao cho subagent), mở có chọn lọc ảnh chụp màn hình và PDF liên quan, rồi lưu bản tin vào `C:\Users\kongn\Downloads\Zalo_MI_Report_<từ>_den_<đến>.md` và trả lời 5 đến 7 ý chính. Bản tin không ghi số điện thoại hay email cá nhân, mỗi ý có dẫn nguồn `(nhóm, ngày, người gửi, #m…)`, ý của Claude ghi "(Nhận định)".
+
+Cài: bản gốc nằm trong repo ở `skills/zalo-mi/SKILL.md`; chép vào thư mục skill của người dùng (sửa xong thì chép lại):
+
+```
+Copy-Item skills\zalo-mi\SKILL.md "$env:USERPROFILE\.claude\skills\zalo-mi\SKILL.md" -Force
+```
+
+Khi skill mới chạy ổn, tắt skill cũ `zalo-energy-mi-digest` (đọc file `zalo_*.md` xuất tay) trong cài đặt claude.ai để hai skill không cùng kích hoạt.
+
 ## Mở Zalo ở chế độ thu thập
 
 ```
@@ -209,6 +221,7 @@ Nhóm `☀️ Future Energy Vietnam 🇻🇳`, giai đoạn 22/09 đến 05/10/2
 | `lib/db.mjs` | Database riêng: lược đồ, upsert idempotent, tìm toàn văn FTS5 bỏ dấu |
 | `lib/normalize.mjs` | Chuẩn hóa tin thô của Zalo theo `msgType` thành tin, link, file, ảnh, sự kiện thành viên |
 | `scripts/zalo-mi-launch.ps1` | Mở Zalo kèm cổng debug, tạo lối tắt "Zalo (MI)" |
+| `skills/zalo-mi/SKILL.md` | Skill lập bản tin (bản gốc; bản đang dùng ở `%USERPROFILE%\.claude\skills\zalo-mi\`) |
 | `lib/net.mjs` | `guardedFetch` (tải chỉ từ máy chủ công cộng, kiểm địa chỉ lúc kết nối và ở mỗi lần chuyển hướng), `checkRemoteUrl`, `isPrivateAddress`; dùng chung cho `files` và `images` |
 | `lib/images.mjs` | `shapeClass`, `textScore`/`hasText` (quyết định có chữ), `jpegVariantUrl`, `fetchImage` (tải ảnh qua `guardedFetch`, giới hạn thời gian và dung lượng), `scanImages` (phần tồn đọng của ảnh chụp màn hình: cache máy, link, giải mã, OCR, lưu; đồng thời 3 ảnh, bảo vệ ổ đĩa), `prunePhotoImages` (xóa file ảnh dáng `photo`, giữ chữ OCR), in kết quả |
 | `lib/files.mjs` | `resolveFile` (một file: chép từ máy, tải theo link, kiểm tra), `resolveFiles` (phần tồn đọng, đồng thời 3 file, bảo vệ ổ đĩa), `remapLocalPath`, đặt tên file, in kết quả |
