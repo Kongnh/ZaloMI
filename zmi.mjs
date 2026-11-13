@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // zmi: reads Zalo group messages from the running Zalo PC app into a private DB for market-intelligence reports.
-// Commands so far: doctor, groups, sync, files, images, export, search.
+// Commands so far: doctor, groups, sync, files, images, export, search, chat (find/read one chat on demand, never stored).
 
 import './lib/suppress-sqlite-warning.mjs'; // before anything loads node:sqlite (see the dynamic import of lib/db.mjs below)
 import { parseArgs } from 'node:util';
@@ -17,6 +17,7 @@ import { scanAndReport, imagesStatusLine, prunePhotoImages, formatPruneReport } 
 import {
   ExportError, resolveRange, resolveSearchRange, selectGroupIds, runExport, searchMessages, formatVnDateTime,
 } from './lib/export.mjs';
+import { ChatError, PAGE_CHARS, findChats, formatChatLine, readChat, formatChatStats } from './lib/chat.mjs';
 
 // Dynamic on purpose. ESM loads a static `node:sqlite` import before any module body runs, so its ExperimentalWarning
 // would fire before the filter in suppress-sqlite-warning.mjs exists. Loaded here, the filter is already in place.
@@ -41,13 +42,17 @@ Lệnh:
   images      Quét chữ trong ảnh chụp màn hình chưa quét (OCR của Zalo, cần mở Zalo); ảnh có chữ được lưu thành JPEG vào data/images/
   export      Xuất tin của các nhóm theo dõi trong một kỳ ra thư mục exports/<ngày-giờ>/ (đã lọc nhiễu, che số điện thoại và email) cho Claude đọc; không cần mở Zalo; dòng cuối in đường dẫn thư mục xuất
   search "từ khóa"  Tìm toàn văn (không phân biệt dấu) trong database, mới nhất trước; không cần mở Zalo
+  chat find "tên"   Tìm chat (1-1 hoặc nhóm, kể cả nhóm không theo dõi) theo tên khách/công ty; in mã chat (cần mở Zalo)
+  chat read <mã chat>  In nội dung MỘT chat ra màn hình, cũ trước, theo trang; đọc thẳng từ Zalo (chỉ đọc), không ghi gì vào database
 
 Tùy chọn:
   --refresh   Với "groups": đọc lại danh sách nhóm từ Zalo (chỉ đọc), cập nhật database và config/groups.json
   --full      Với "sync": đọc lại toàn bộ lịch sử của mỗi nhóm thay vì chỉ tin mới
   --groups A,B  Với "sync", "export", "search": chỉ các nhóm này (convId cách nhau bằng dấu phẩy) thay vì mọi nhóm đang theo dõi
-  --from YYYY-MM-DD  Với "export" và "search": từ ngày này (giờ Việt Nam). "export" mặc định 14 ngày gần nhất; "search" mặc định không giới hạn
-  --to YYYY-MM-DD    Với "export" và "search": đến hết ngày này (giờ Việt Nam)
+  --from YYYY-MM-DD  Với "export", "search" và "chat read": từ ngày này (giờ Việt Nam). "export" mặc định 14 ngày gần nhất; "search" và "chat read" mặc định không giới hạn
+  --to YYYY-MM-DD    Với "export", "search" và "chat read": đến hết ngày này (giờ Việt Nam)
+  --page N           Với "chat read": trang thứ N (mỗi trang khoảng ${PAGE_CHARS.toLocaleString('vi-VN')} ký tự; mặc định 1)
+  --save-to THƯ_MỤC  Với "chat read": chép mọi file và ảnh chụp màn hình có chữ của trang này vào thư mục đó (đường dẫn đầy đủ)
   --out THƯ_MỤC      Với "export": thư mục xuất (mặc định exports/<YYYYMMDD-HHmm>/; phải chưa có hoặc đang trống)
   --retry     Với "files": thử lại cả file lỗi và file chỉ có link
   --limit N   Với "files": chỉ xử lý N file (mới nhất trước); với "images": chỉ quét N ảnh (theo thứ tự ưu tiên); với "search": tối đa N kết quả (mặc định 50)
@@ -513,10 +518,69 @@ export async function searchCommand({ query, from, to, groups: requested, limit 
   }
 }
 
+/**
+ * zmi chat find "tên" | zmi chat read <convId> [--from D] [--to D] [--page N] [--save-to DIR].
+ * Reads one conversation straight from Zalo through the read-only bridge and prints it. Never opens the database
+ * (Cong's rule: chats read on demand are not stored); only --save-to writes, and only files and screenshots, to that folder.
+ * `open` and the option objects are injectable for tests.
+ * Exit code: 0 done, 1 Zalo not open / read failed, 2 bad usage or unknown chat.
+ */
+export async function chatCommand({ sub, args = [], from, to, page, saveTo, port, open = openBridge, fileOptions, imageOptions }) {
+  if (sub !== 'find' && sub !== 'read') {
+    console.error('Cách dùng: node zmi.mjs chat find "tên khách"  |  node zmi.mjs chat read <mã chat> [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--page N] [--save-to THƯ_MỤC]');
+    return 2;
+  }
+  if (sub === 'find' && (from !== undefined || to !== undefined || page !== undefined || saveTo !== undefined)) {
+    console.error('"chat find" không nhận --from, --to, --page hay --save-to.');
+    return 2;
+  }
+  let range = {};
+  if (sub === 'read') {
+    if (args.length !== 1) { console.error('"chat read" cần đúng một mã chat (lấy từ: node zmi.mjs chat find "tên").'); return 2; }
+    try {
+      range = resolveSearchRange({ from, to });
+    } catch (error) {
+      if (error instanceof ExportError) { console.error(error.message); return error.exitCode; }
+      throw error;
+    }
+  }
+
+  let bridge;
+  try {
+    bridge = await open({ port });
+  } catch (error) {
+    return reportOpenFailure(error, port);
+  }
+  try {
+    if (sub === 'find') {
+      const { chats, total, searchedStrangers } = await findChats(bridge, args.join(' '));
+      if (total === 0) { console.log(`Không thấy chat nào có tên khớp "${args.join(' ')}" (đã tìm cả danh bạ, nhóm và người chưa kết bạn).`); return 0; }
+      if (searchedStrangers) console.log('(Không có trong danh bạ hay tên nhóm; kết quả dưới đây là người chưa kết bạn, theo tên họ hiển thị trong tin.)');
+      for (const c of chats) console.log(formatChatLine(c));
+      if (total > chats.length) console.log(`(Hiện ${chats.length}/${total} chat; gõ tên cụ thể hơn để thu hẹp.)`);
+      return 0;
+    }
+    const result = await readChat(bridge, args[0], { ...range, page: page ?? 1, saveTo, fileOptions, imageOptions });
+    for (const line of [...result.header, ...result.lines]) console.log(line);
+    console.log('');
+    console.log(`(${formatChatStats(result.stats, result.saveDir)})`);
+    if (result.stats.ocrStopped) console.log('⚠ OCR của Zalo lỗi nhiều lần liên tiếp nên đã dừng đọc ảnh chụp màn hình của trang này; kiểm tra Zalo rồi chạy lại trang.');
+    if (result.saveDir) console.log(`File lưu tại: ${result.saveDir}`);
+    console.log(result.page < result.pages ? `Trang ${result.page}/${result.pages}. Xem tiếp: thêm --page ${result.page + 1}` : `Trang ${result.page}/${result.pages} (trang cuối).`);
+    return 0;
+  } catch (error) {
+    if (error instanceof ChatError) { console.error(error.message); return error.exitCode; }
+    console.error(`Không đọc được chat: ${String(error?.message ?? error).split('\n')[0]}`);
+    return 1;
+  } finally {
+    bridge.close();
+  }
+}
+
 async function main(argv) {
   let parsed;
   try {
-    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, refresh: { type: 'boolean' }, full: { type: 'boolean' }, groups: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, out: { type: 'string' }, retry: { type: 'boolean' }, rescan: { type: 'boolean' }, 'prune-photos': { type: 'boolean' }, limit: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
+    parsed = parseArgs({ args: argv, allowPositionals: true, options: { port: { type: 'string' }, refresh: { type: 'boolean' }, full: { type: 'boolean' }, groups: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, out: { type: 'string' }, retry: { type: 'boolean' }, rescan: { type: 'boolean' }, 'prune-photos': { type: 'boolean' }, limit: { type: 'string' }, page: { type: 'string' }, 'save-to': { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
   } catch (error) {
     console.error(`${error.message}\n\n${USAGE}`);
     return 2;
@@ -537,9 +601,21 @@ async function main(argv) {
     console.error(`--groups chỉ dùng với lệnh sync, export và search.\n\n${USAGE}`);
     return 2;
   }
-  if ((values.from !== undefined || values.to !== undefined) && command !== 'export' && command !== 'search') {
-    console.error(`--from và --to chỉ dùng với lệnh export và search.\n\n${USAGE}`);
+  if ((values.from !== undefined || values.to !== undefined) && command !== 'export' && command !== 'search' && command !== 'chat') {
+    console.error(`--from và --to chỉ dùng với lệnh export, search và chat read.\n\n${USAGE}`);
     return 2;
+  }
+  if ((values.page !== undefined || values['save-to'] !== undefined) && command !== 'chat') {
+    console.error(`--page và --save-to chỉ dùng với lệnh chat read.\n\n${USAGE}`);
+    return 2;
+  }
+  let page;
+  if (values.page !== undefined) {
+    page = Number(values.page);
+    if (!Number.isInteger(page) || page < 1) {
+      console.error(`--page cần một số nguyên từ 1 trở lên, nhận được: "${values.page}".\n\n${USAGE}`);
+      return 2;
+    }
   }
   if (values.out !== undefined && command !== 'export') {
     console.error(`--out chỉ dùng với lệnh export.\n\n${USAGE}`);
@@ -592,6 +668,8 @@ async function main(argv) {
       return exportCommand({ from: values.from, to: values.to, groups: values.groups, out: values.out });
     case 'search':
       return searchCommand({ query: rest.join(' '), from: values.from, to: values.to, groups: values.groups, limit });
+    case 'chat':
+      return chatCommand({ sub: rest[0], args: rest.slice(1), from: values.from, to: values.to, page, saveTo: values['save-to'], port });
     default:
       console.error(`${command ? `Lệnh không biết: "${command}".` : 'Thiếu lệnh.'}\n\n${USAGE}`);
       return 2;

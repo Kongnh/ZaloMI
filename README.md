@@ -159,6 +159,22 @@ node zmi.mjs search "hội thảo" --groups g123
 
 `search` tìm toàn văn trong chữ tin, tiêu đề/mô tả link, tên file và chữ OCR của ảnh, không phân biệt hoa thường và dấu (`dien` khớp `điện`). Mỗi kết quả một dòng `[YYYY-MM-DD HH:mm] <nhóm> | <người gửi>: <~200 ký tự quanh chỗ khớp, đã che> #m<mã tin>`; tin thu hồi, đã xóa, sticker, video không bao giờ được trả về. Mặc định: mọi ngày, các nhóm đang theo dõi. Không cần Zalo. Mã thoát 0 (cả khi không có kết quả), 1 chưa có database, 2 thiếu từ khóa hay sai tùy chọn. Từ khóa bắt đầu bằng `-` phải đặt sau `--`: `node zmi.mjs search -- "-abc"`.
 
+### Đọc một chat theo yêu cầu (`chat`, thêm 09/11/2026)
+
+Để tổng hợp trao đổi với khách hàng (chat 1-1 hoặc nhóm bất kỳ, kể cả nhóm không theo dõi). **Không ghi gì vào database**, không tạo file chứa nội dung chat: tin chỉ được in ra màn hình. Cần Zalo mở ở chế độ thu thập; đọc qua cầu nối chỉ đọc như `sync`, nên không đánh dấu đã xem, không gửi gì.
+
+```
+node zmi.mjs chat find "Nam GreenPower"                     # mã chat | 1-1/nhóm | tên | giờ tin cuối
+node zmi.mjs chat read <mã chat>                            # toàn bộ lịch sử trên máy, trang 1
+node zmi.mjs chat read <mã chat> --from 2026-09-01 --page 2 --save-to "C:\...\2026\14. GAP\Zalo files\Nam GreenPower"
+```
+
+- `find` tìm theo tên gợi nhớ trong danh bạ, tên Zalo và tên nhóm, không phân biệt dấu; không khớp ai thì tìm tiếp trong chat với người chưa kết bạn (theo tên họ hiển thị trong tin, chậm hơn).
+- `read` in theo trang khoảng 20.000 ký tự, cũ trước, cùng định dạng dòng với `export` (`[HH:mm] Người gửi: nội dung #m<mã>`, tin trả lời có `(trả lời "…")`). Giữ cả tin ngắn; bỏ sticker, video, tin thu hồi, tin đã xóa. Không che số điện thoại, email (báo cáo chỉ Cong đọc).
+- `--save-to` (đường dẫn đầy đủ, không được nằm trong thư mục Zalo hay `data/`): chép mọi file của trang đó (mọi loại, tối đa 100 MB; file đã có thì không chép lại) và ảnh chụp màn hình có chữ (OCR của Zalo trên bản tạm trong `%TEMP%`). Ảnh thường không chép, không đọc. Không có `--save-to` thì chỉ ghi tên file, không quét ảnh.
+- Mã thoát: 0 xong, 1 Zalo chưa mở hoặc đọc lỗi, 2 sai cách dùng hoặc mã chat không có.
+- Skill `zalo-chat-report` (bản gốc `skills/zalo-chat-report/SKILL.md`) dùng lệnh này để viết báo cáo vào folder workstream.
+
 ## Thử nghiệm ảnh (bước 0 của Task 7)
 
 **Đổi JXL sang JPEG.** Thử theo thứ tự của spec:

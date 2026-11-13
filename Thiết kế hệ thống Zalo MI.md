@@ -35,7 +35,7 @@ Bản tin chỉ để Cong đọc. Nếu cần chia sẻ, Cong sẽ tự chọn 
 **Ngoài phạm vi**
 - Đọc hoặc gửi theo thời gian thực. **[Cong quyết]**
 - Gửi tin nhắn hay làm bất cứ thao tác nào trên Zalo thay Cong. **[Cong quyết]**
-- Chat riêng 1-1. Chỉ lấy các nhóm trong danh sách theo dõi. **[Claude quyết]**
+- Lưu chat riêng 1-1 vào database. `sync` chỉ lấy các nhóm trong danh sách theo dõi. **[Claude quyết]** Ngoại lệ từ 09/11/2026: lệnh `zmi chat` đọc **một** chat (1-1 hoặc nhóm bất kỳ) khi Cong yêu cầu, chỉ in ra màn hình, không ghi vào database (mục 14). **[Cong quyết]**
 - Giao diện web, dashboard, chạy trên cloud, chạy trên điện thoại.
 - Lưu sticker, video, ảnh thường.
 - Một database "thực thể" lâu dài (danh bạ dự án, danh bạ người). Bản tin trích xuất mỗi lần chạy; lưu thực thể có thể làm sau.
@@ -263,7 +263,7 @@ Khi Cong nhờ tổng hợp, cập nhật hay làm bản tin market intelligence
 4. **Đọc theo nhóm:** với mỗi file nhóm, trích các mục theo chủ đề (mục 9.4), mỗi mục kèm nguồn: nhóm, ngày, người gửi, mã tin. Nhóm lớn có thể giao cho subagent chạy song song. Nhóm nhỏ thì tự đọc. Ngưỡng chia là **[Builder quyết]**.
 5. **Xem tài liệu đính kèm có chọn lọc:** dựa vào chú thích và `ocr_text`, mở ảnh có chữ và file PDF (vài trang đầu) khi chúng liên quan đến chính sách, giá, dự án hay sự kiện. Không mở hết.
 6. **Tổng hợp:** gộp trùng giữa các nhóm (cùng một tin được đăng ở nhiều nhóm), sắp theo mức quan trọng, rồi viết bản tin theo mục 9.4.
-7. **Lưu và báo:** lưu file, trả cho Cong đường dẫn file cùng 5 đến 7 ý chính.
+7. **Lưu và báo:** lưu file bản tin và file tín hiệu (mục 9.5), trả cho Cong đường dẫn file cùng 5 đến 7 ý chính.
 
 ### 9.4 Bản tin
 
@@ -284,11 +284,27 @@ Theo văn phong của các bản tin MI hiện có của Cong (ví dụ `PEWG_MI
 - Lưu vào `C:\Users\kongn\Downloads\Zalo_MI_Report_<từ ngày>_den_<đến ngày>.md`, giống chỗ lưu của bản tin PEWG. **[Claude quyết]**
 - Câu nào là nhận định của Claude thì ghi rõ "(Nhận định)", như bản tin PEWG.
 
+### 9.5 File tín hiệu cho hub (thêm 03/11/2026)
+
+Theo thiết kế đồng bộ hub và cẩm nang (`Allotrope/2026/19. Clean Energy Handbook/Handbook_2026/HANDBOOK_HUB_SYNC_DESIGN.md` mục 5.6, pha 4; Cong duyệt S-05 ngày 03/11/2026). Mỗi bản tin có thêm một file `Zalo_MI_Report_<từ>_den_<đến>.signals.csv` cạnh nó, cùng hậu tố `_vN`. **[Cong quyết]**
+
+- **Vì sao:** job hub sáng thứ Hai ghi mỗi tin chính sách thành một sự kiện dưới chủ đề T-01 đến T-09; folder cẩm nang khớp sự kiện đó với văn bản gốc và sổ sự thật pháp lý. Đọc bảng mục 2 của bản tin bằng chữ thì tốn và dễ sót văn bản đã mở ở mục 8.
+- **Gồm:** tin chính sách và quy định (mục 2 của bản tin) và văn bản pháp luật, công văn đã mở (mục 8). Không gồm giấy mời, nghiên cứu, giá.
+- **Cột:** `ngay,nhom,ma_tin,chu_de,loai_su_kien,van_ban_nhac,key_hint,da_mo_goc,tom_tat,muc_bao_cao`. Tên cột trùng với trường của fact `event` trong hub (`date`, `source`, `source_ref`, theme, `event_type`, `van_ban_nhac`, `key_hint`, `original_opened`, `text`), để hub chép thẳng sang op `add_fact`. Định nghĩa từng cột ở bước 8b của skill.
+- **Định dạng:** UTF-8 có BOM, ngày ISO, nhiều giá trị trong một ô phân cách bằng `|`. Ví dụ:
+
+```
+2026-10-31,DNSolar|VREN|NLTT-ĐGNK,#m8438161842955|#m8438394246240,T-03,ky,QĐ 2892/QĐ-BCT,QD_2892_BCT_2026,1,"Giá bán lẻ bình quân 2.159,9037 đ/kWh chưa VAT từ 01/11/2026",2|8
+```
+
+- **Bảo mật:** không số điện thoại, email, mã người dùng Zalo hay tên người gửi; skill kiểm rò rỉ trên file này như trên bản tin. Tin Zalo vẫn là tín hiệu [S] với hub, kể cả khi `da_mo_goc=1`.
+- **Không đổi:** `zmi` và database không đổi; chỉ skill ghi thêm file này.
+
 ## 10. Cấu trúc thư mục
 
 ```
 Zalodatabase/
-  zmi.mjs                    CLI: sync, images, groups, export, search, doctor
+  zmi.mjs                    CLI: sync, images, groups, export, search, doctor, chat
   lib/                       cdp, zalo-bridge (chỉ đọc), db (schema, upsert), normalize, export, redact
   config/groups.json         nhóm theo dõi
   scripts/zalo-mi-launch.ps1 mở Zalo kèm cổng debug + tạo shortcut
@@ -327,6 +343,26 @@ Tách file trong `lib/` thế nào là **[Builder quyết]**.
 | Zalo cập nhật làm đổi tên module hoặc cấu trúc bên trong | Tìm module theo hình dạng; `zmi doctor` báo lỗi rõ; README có cách sửa |
 | Quên mở Zalo kèm cổng debug | Skill nhắc Cong, cho phép dùng dữ liệu cũ, ghi rõ ngày sync |
 | Lỡ gọi hàm ghi vào database Zalo | Lớp bọc chỉ cho phép hàm đọc, có test |
+
+## 14. Đọc một chat theo yêu cầu (`zmi chat`, thêm 09/11/2026)
+
+**Mục đích [Cong quyết]:** tổng hợp trao đổi với khách hàng qua Zalo để làm báo cáo cho riêng Cong. Nội dung báo cáo theo yêu cầu từng lần, dạng markdown.
+
+**Cách chạy**
+- `zmi chat find "<tên>"`: tìm chat theo tên trong danh bạ (tên gợi nhớ và tên Zalo), tên nhóm (kể cả nhóm không theo dõi), và nếu không khớp thì theo tên người chưa kết bạn hiển thị trong tin. In mã chat, loại (1-1/nhóm), tên, giờ tin cuối.
+- `zmi chat read <mã> [--from] [--to] [--page N] [--save-to THƯ_MỤC]`: đọc thẳng từ Zalo qua cầu nối chỉ đọc, in ra màn hình theo trang khoảng 20.000 ký tự, cũ trước.
+
+**Quy tắc [Cong quyết]**
+- Chỉ đọc chat Cong chỉ định, khi Cong yêu cầu. Không ghi gì vào `data/zalo-mi.db`, không tạo file chứa nội dung chat; `lib/chat.mjs` không import `lib/db.mjs` (có test).
+- Mọi file trong chat (mọi loại, tối đa 100 MB) được chép vào thư mục `--save-to`, thường là `<folder workstream>\Zalo files\<tên chat>\`. File đã có (cùng tên, cùng nội dung) không chép lại.
+- Ảnh chụp màn hình được OCR; ảnh có chữ được chép vào cùng thư mục để Claude mở. Ảnh thường không chép, không đọc. File scan được chép nhưng Claude không đọc.
+- Không che số điện thoại, email trong nội dung chat (báo cáo chỉ Cong đọc). Mã chat (Zalo id) không đưa vào báo cáo.
+
+**[Claude quyết]**
+- Giữ cả tin ngắn ("ok anh") vì trong chat với khách đó thường là xác nhận; vẫn bỏ sticker, video, tin thu hồi, tin đã xóa.
+- Tin trả lời ghi kèm `(trả lời "…")` để giữ mạch trao đổi.
+- `--save-to` phải là đường dẫn đầy đủ, không nằm trong thư mục Zalo hay `data/` của zmi. OCR luôn chạy trên bản tạm trong `%TEMP%`, không bao giờ trên file trong thư mục của Cong hay của Zalo.
+- Skill `zalo-chat-report` điều phối: tìm chat, Cong xác nhận, đọc từng trang, mở file và ảnh, viết báo cáo vào folder workstream.
 | Cổng debug bị chương trình khác trên máy lợi dụng | Chỉ nghe ở 127.0.0.1, chỉ bật khi cần, có cảnh báo trong README |
 | Số điện thoại cá nhân lọt vào bản tin | Che trong chữ chat khi export, có test; skill được dặn chỉ ghi liên hệ chung của tổ chức |
 | Quét chữ hàng nghìn ảnh làm lần đồng bộ đầu quá lâu | `zmi images` chạy riêng, tăng dần, có giới hạn mỗi lần; ưu tiên ảnh có dáng ảnh chụp màn hình và ảnh mới |
