@@ -145,6 +145,31 @@ Always save to `C:\Users\kongn\OneDrive\Máy tính\New Topic\00. Market intel\Za
 
 **Before saving, check for leaks**: search the draft for phone-like digit runs (`0` + 8–10 digits with optional spaces/dots, `+84…`) and `@`. Remove any that are personal.
 
+### 8b. Write the signals file
+
+Next to the report, write `<report file name without .md>.signals.csv` (same `_vN` suffix as the report). The Allotrope hub reads it first to log policy events, and the handbook folder matches them to legal texts, so keep it exact. One row per policy item from section 2 and per opened document from section 8 that is a legal or official text (not event invitations or studies). An item in both sections is one row with `muc_bao_cao` `2|8`.
+
+Write it with Python's `csv` module, UTF-8 with BOM, header exactly:
+
+```
+ngay,nhom,ma_tin,chu_de,loai_su_kien,van_ban_nhac,key_hint,da_mo_goc,tom_tat,muc_bao_cao
+```
+
+| Column | Content |
+|---|---|
+| `ngay` | `YYYY-MM-DD` of the event itself (signing date for `ky`, draft date for `du_thao`); the post date only when the event has no date of its own; empty for an undated discussion |
+| `nhom` | short group names, `\|`-separated, as cited in the report |
+| `ma_tin` | `#m` ids, `\|`-separated |
+| `chu_de` | one theme code: T-01 Luật Điện lực sửa đổi · T-02 DPPA (NĐ 57/58, NĐ 243, TT 29, đề xuất địa phương) · T-03 giá bán lẻ, TOU, giá hai thành phần · T-04 ĐMTMN, bán điện dư, giấy phép · T-05 khung giá phát điện, BESS lưới · T-06 carbon, KNK, hệ số phát thải · T-07 tài chính xanh, hiệu quả năng lượng, ODA, JETP · T-08 quy hoạch, thể chế ngành điện · T-09 KCN và chuyển dịch cấp khu. Empty if none fits |
+| `loai_su_kien` | one of `du_thao`, `lay_y_kien`, `trinh`, `ky`, `hieu_luc`, `sua_doi`, `thay_the`, `huong_dan`, `thi_diem`, `trien_khai`, `de_xuat_dia_phuong`, `phan_tich`, `tin_thi_truong`, `khac` |
+| `van_ban_nhac` | the instrument the item is about, and article if given, exactly as written in the source, e.g. `QĐ 2892/QĐ-BCT`, `NĐ 243/2026/NĐ-CP Điều 1`; several separated by `; `. Add another instrument only when the item changes or applies it (a draft amending QĐ 14/2025, a letter implementing QĐ 963), never the legal bases a document lists in its preamble: each one sends the handbook to re-check every card citing it. Required for `du_thao`, `lay_y_kien`, `trinh`, `ky`, `hieu_luc`, `sua_doi`, `thay_the`, `huong_dan` |
+| `key_hint` | optional guess at the key: `ND_<số>_<năm>`, `LUAT_<số>_<năm>`, `<TT\|NQ\|QD\|CV\|TB>_<số>_<cơ quan>_<năm>` (e.g. `QD_2892_BCT_2026`), `DT_` + short name for a draft. Leave empty when unsure; the handbook assigns the real key |
+| `da_mo_goc` | `1` if this run opened the document itself (step 5), else `0`. It stays a group signal, not a verified source |
+| `tom_tat` | one sentence in Vietnamese, as in the report, without prices from the groups |
+| `muc_bao_cao` | report section(s) the row comes from: `2`, `8` or `2\|8` |
+
+No phone numbers, e-mails, Zalo user ids or sender names in any column. Run the leak check on this file too, then read it back with `csv.DictReader` to confirm the header and that every row has 10 fields. If section 2 has no item, write the header only.
+
 ### 9. Reply to Cong
 
-The saved file path, then 5–7 key points in Vietnamese (one line each), then anything that limited the report (stale data, failed groups, attachments that could not be opened). Keep it short; the report holds the detail.
+The saved file path (and the signals file with its row count), then 5–7 key points in Vietnamese (one line each), then anything that limited the report (stale data, failed groups, attachments that could not be opened). Keep it short; the report holds the detail.
