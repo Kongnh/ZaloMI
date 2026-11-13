@@ -91,10 +91,12 @@ function Get-ZaloProcesses {
 function Stop-ZaloProcesses {
     param([int]$TimeoutSeconds = 15, [int]$IntervalMilliseconds = 500)
 
-    Get-ZaloProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+    # Dừng lại ở mỗi vòng: tiến trình con Zalo có thể vừa mới mọc ra sau lần dừng trước.
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ($true) {
-        if (@(Get-ZaloProcesses).Count -eq 0) { return $true }
+        $left = @(Get-ZaloProcesses)
+        if ($left.Count -eq 0) { return $true }
+        $left | Stop-Process -Force -ErrorAction SilentlyContinue
         if ((Get-Date) -ge $deadline) { return $false }
         Start-Sleep -Milliseconds $IntervalMilliseconds
     }

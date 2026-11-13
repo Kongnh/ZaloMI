@@ -73,6 +73,13 @@ Describe 'Stop-ZaloProcesses' {
         Stop-ZaloProcesses -TimeoutSeconds 5 -IntervalMilliseconds 10 | Should Be $true
     }
 
+    It 'keeps stopping Zalo processes that appear after the first stop' {
+        $script:calls = 0
+        Mock Get-ZaloProcesses { $script:calls++; if ($script:calls -le 3) { @([pscustomobject]@{ Id = $script:calls }) } else { @() } }
+        Stop-ZaloProcesses -TimeoutSeconds 5 -IntervalMilliseconds 10 | Should Be $true
+        Assert-MockCalled Stop-Process -Scope It -Times 2
+    }
+
     It 'returns $false when a Zalo process is still there after the timeout' {
         Mock Get-ZaloProcesses { @([pscustomobject]@{ Id = 1 }) }
         Stop-ZaloProcesses -TimeoutSeconds 0 -IntervalMilliseconds 10 | Should Be $false
