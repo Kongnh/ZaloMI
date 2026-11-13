@@ -6,14 +6,16 @@
   Công cụ đọc Zalo qua Chrome DevTools Protocol tại 127.0.0.1:<Port>. Cổng này chỉ có khi Zalo được mở với
   --remote-debugging-port=<Port> --remote-allow-origins=http://127.0.0.1:<Port>.
 
-  Script xử lý ba trạng thái và KHÔNG BAO GIỜ tự thoát, tắt hay khởi động lại một Zalo đang chạy:
+  Script xử lý ba trạng thái. Không có -Restart thì KHÔNG BAO GIỜ tự thoát, tắt hay khởi động lại một Zalo đang chạy:
     1. Zalo đang chạy và cổng debug trả lời (có cửa sổ "Zalo")  -> báo sẵn sàng, mã thoát 0.
     2. Zalo đang chạy nhưng cổng debug không trả lời            -> in hướng dẫn thoát hẳn Zalo, mã thoát 2.
+                                                                   Với -Restart: buộc tắt Zalo rồi làm như trạng thái 3.
     3. Zalo chưa chạy                                           -> mở Zalo.exe mới nhất kèm cờ debug, chờ cổng mở
                                                                    (tối đa 60 giây), báo sẵn sàng, mã thoát 0.
 
   Mã thoát: 0 sẵn sàng | 1 lỗi bất ngờ | 2 Zalo đang chạy không có cổng debug | 3 hết giờ chờ cổng |
-            4 không tìm thấy Zalo.exe | 5 cổng mở nhưng chưa thấy cửa sổ "Zalo".
+            4 không tìm thấy Zalo.exe | 5 cổng mở nhưng chưa thấy cửa sổ "Zalo" |
+            6 (-Restart) không tắt được Zalo sau 15 giây.
 
   Lần chạy thật đầu tiên còn tạo lối tắt "Zalo (MI)" trên Desktop (không bao giờ ghi đè lối tắt đã có).
 
@@ -25,13 +27,18 @@
 
 .PARAMETER NoShortcut
   Không tạo lối tắt trên Desktop.
+
+.PARAMETER Restart
+  Dùng cho skill: nếu Zalo đang chạy không có cổng debug thì buộc tắt Zalo rồi mở lại kèm cổng (mất tin đang gõ dở,
+  ngắt cuộc gọi đang diễn ra). Zalo ở chế độ này tới khi tắt máy. Không có cờ này thì script không bao giờ tắt Zalo.
 #>
 [CmdletBinding()]
 param(
     [ValidateRange(1, 65535)]
     [int]$Port = 9222,
     [switch]$DryRun,
-    [switch]$NoShortcut
+    [switch]$NoShortcut,
+    [switch]$Restart
 )
 
 # Khi chỉ nạp bằng dot-source để thử hàm thì không đổi chế độ của phiên đang gọi.
@@ -77,6 +84,22 @@ function Get-ZaloLaunchArguments {
 
 function Get-ZaloProcesses {
     @(Get-Process -Name 'Zalo' -ErrorAction SilentlyContinue)
+}
+
+# Buộc dừng mọi tiến trình Zalo (chỉ dùng với -Restart) và chờ chúng thoát hết.
+# Trả về $true khi không còn tiến trình Zalo nào, $false nếu hết $TimeoutSeconds mà vẫn còn.
+function Stop-ZaloProcesses {
+    param([int]$TimeoutSeconds = 15, [int]$IntervalMilliseconds = 500)
+
+    # Dừng lại ở mỗi vòng: tiến trình con Zalo có thể vừa mới mọc ra sau lần dừng trước.
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ($true) {
+        $left = @(Get-ZaloProcesses)
+        if ($left.Count -eq 0) { return $true }
+        $left | Stop-Process -Force -ErrorAction SilentlyContinue
+        if ((Get-Date) -ge $deadline) { return $false }
+        Start-Sleep -Milliseconds $IntervalMilliseconds
+    }
 }
 
 # GET http://127.0.0.1:<Port><Path>; trả về nội dung văn bản hoặc $null nếu cổng không trả lời.
@@ -272,6 +295,7 @@ function Invoke-ZaloLaunch {
         [int]$Port = 9222,
         [switch]$DryRun,
         [switch]$NoShortcut,
+        [switch]$Restart,
         [int]$TimeoutSeconds = 60,
         [int]$IntervalMilliseconds = 1000
     )
@@ -280,6 +304,7 @@ function Invoke-ZaloLaunch {
     $exe = if ($zalo) { $zalo.Path } else { $null }
     $launchArguments = Get-ZaloLaunchArguments -Port $Port
     $state = Get-LaunchState -Port $Port
+    $willRestart = $Restart -and $state -eq 'RunningNoPort'
 
     if ($DryRun) {
         Write-Host '[DryRun] Chỉ kiểm tra, không mở Zalo và không tạo lối tắt.'
@@ -290,11 +315,16 @@ function Invoke-ZaloLaunch {
         } else {
             Write-Host "Zalo.exe mới nhất : không tìm thấy trong $(Get-ZaloInstallRoot)"
         }
-        Write-Host "Trạng thái        : $(Get-StateDescription -State $state -Port $Port)"
+        if ($willRestart) {
+            $count = @(Get-ZaloProcesses).Count
+            Write-Host "Trạng thái        : Zalo đang chạy không có cổng $Port. (-Restart) sẽ buộc tắt $count tiến trình Zalo rồi mở lại với lệnh trên."
+        } else {
+            Write-Host "Trạng thái        : $(Get-StateDescription -State $state -Port $Port)"
+        }
         $shortcutPath = Get-ShortcutPath
         $shortcutNote = if (Test-Path -LiteralPath $shortcutPath) { 'đã có, sẽ không ghi đè' } else { 'chưa có, sẽ tạo khi chạy thật; dùng -NoShortcut để bỏ qua' }
         Write-Host "Lối tắt Desktop   : $shortcutPath ($shortcutNote)"
-        if ($state -eq 'NotRunning' -and -not $exe) { return 4 }
+        if (($state -eq 'NotRunning' -or $willRestart) -and -not $exe) { return 4 }
         return 0
     }
 
@@ -315,8 +345,21 @@ function Invoke-ZaloLaunch {
             return 0
         }
         'RunningNoPort' {
-            Write-RunningNoPortGuidance -Port $Port
-            return 2
+            if (-not $Restart) {
+                Write-RunningNoPortGuidance -Port $Port
+                return 2
+            }
+            # Kiểm tra Zalo.exe trước khi tắt, để không bỏ người dùng lại không có Zalo.
+            if (-not $exe) {
+                Write-Fail "Không tìm thấy Zalo.exe trong $(Get-ZaloInstallRoot) (cần thư mục dạng Zalo-<phiên bản>). Không tắt Zalo đang chạy."
+                return 4
+            }
+            Write-Host "Zalo đang mở ở chế độ thường. Đang tắt và mở lại kèm cổng debug $Port (Zalo sẽ ở chế độ này tới khi tắt máy)..."
+            if (-not (Stop-ZaloProcesses)) {
+                Write-Fail 'Không tắt được Zalo sau 15 giây. Hãy thoát Zalo ở khay hệ thống (chuột phải > Thoát) rồi chạy lại.'
+                return 6
+            }
+            break  # Zalo đã tắt: mở lại như trạng thái 3 ở dưới.
         }
         'PortNoWindow' {
             Write-PortNoWindowMessage -Port $Port
@@ -362,7 +405,7 @@ if ($script:DotSourced) { return }
 
 $exitCode = 1
 try {
-    $exitCode = @(Invoke-ZaloLaunch -Port $Port -DryRun:$DryRun -NoShortcut:$NoShortcut)[-1]
+    $exitCode = @(Invoke-ZaloLaunch -Port $Port -DryRun:$DryRun -NoShortcut:$NoShortcut -Restart:$Restart)[-1]
 } catch {
     Write-Fail "Lỗi bất ngờ: $($_.Exception.Message)"
 }

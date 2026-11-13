@@ -7,7 +7,7 @@ Hiện có: kết nối CDP, cầu nối chỉ đọc, các lệnh `doctor`, `gr
 ## Yêu cầu
 
 - Windows, Node 24 trở lên.
-- Zalo PC đang mở **kèm cờ** `--remote-debugging-port=9222` (lối tắt "Zalo (MI)", xem bên dưới). Phải thoát hẳn Zalo trước khi mở lại, nếu không Zalo đang chạy sẽ bỏ qua cờ này. Cổng chỉ mở ở `127.0.0.1`. Chỉ `doctor`, `groups --refresh`, `sync` và `images` cần Zalo mở; `files`, `export`, `search` thì không.
+- Zalo PC đang mở **kèm cờ** `--remote-debugging-port=9222` (lối tắt "Zalo (MI)", xem bên dưới). Phải thoát hẳn Zalo trước khi mở lại, nếu không Zalo đang chạy sẽ bỏ qua cờ này; hai skill tự làm việc này bằng `-Restart` khi cần. Cổng chỉ mở ở `127.0.0.1`. Chỉ `doctor`, `groups --refresh`, `sync` và `images` cần Zalo mở; `files`, `export`, `search` thì không.
 
 ## Skill `zalo-mi`: bản tin theo yêu cầu
 
@@ -26,19 +26,26 @@ Khi skill mới chạy ổn, tắt skill cũ `zalo-energy-mi-digest` (đọc fil
 ```
 powershell -ExecutionPolicy Bypass -File scripts\zalo-mi-launch.ps1            # hoặc bấm lối tắt "Zalo (MI)" trên Desktop
 powershell -ExecutionPolicy Bypass -File scripts\zalo-mi-launch.ps1 -DryRun    # chỉ in Zalo.exe, lệnh sẽ chạy và trạng thái
+powershell -ExecutionPolicy Bypass -File scripts\zalo-mi-launch.ps1 -Restart -NoShortcut   # skill dùng: tự tắt Zalo thường rồi mở lại kèm cổng
 ```
 
 Script tìm thư mục `Zalo-<phiên bản>` mới nhất trong `%LOCALAPPDATA%\Programs\Zalo\`, rồi:
 
 1. Zalo đang chạy và cổng debug trả lời: báo sẵn sàng (mã 0).
-2. Zalo đang chạy **không** có cổng debug: in hướng dẫn thoát hẳn Zalo (khay hệ thống → Thoát) rồi chạy lại (mã 2). Script **không bao giờ** tự tắt Zalo.
+2. Zalo đang chạy **không** có cổng debug: in hướng dẫn thoát hẳn Zalo (khay hệ thống → Thoát) rồi chạy lại (mã 2). Không có `-Restart` thì script **không bao giờ** tự tắt Zalo. Có `-Restart` (hai skill dùng): kiểm tra có `Zalo.exe`, buộc dừng mọi tiến trình Zalo (mất tin đang gõ dở, ngắt cuộc gọi), chờ tối đa 15 giây rồi làm như trạng thái 3. Khởi động lại mất khoảng 12–20 giây; Zalo ở chế độ thu thập tới khi tắt máy, nên các lần chạy sau trong cùng phiên rơi vào trạng thái 1.
 3. Zalo chưa chạy: mở `Zalo.exe --remote-debugging-port=9222 --remote-allow-origins=http://127.0.0.1:9222`, chờ cổng mở tối đa 60 giây (mã 0; hết giờ: 3).
 
-Mã khác: 4 không tìm thấy `Zalo.exe`, 5 cổng mở nhưng chưa có cửa sổ "Zalo" (đợi Zalo đăng nhập xong rồi chạy lại), 1 lỗi bất ngờ. Lần chạy thật đầu tiên tạo lối tắt "Zalo (MI)" trên Desktop (không ghi đè lối tắt đã có; `-NoShortcut` để bỏ). Lối tắt gọi chính script này nên vẫn đúng khi Zalo cập nhật sang thư mục phiên bản mới. `-Port N` đổi cổng.
+Mã khác: 4 không tìm thấy `Zalo.exe` (với `-Restart`: báo trước khi tắt gì), 5 cổng mở nhưng chưa có cửa sổ "Zalo" (đợi Zalo đăng nhập xong rồi chạy lại), 6 (`-Restart`) Zalo không tắt sau 15 giây, 1 lỗi bất ngờ. Lần chạy thật đầu tiên tạo lối tắt "Zalo (MI)" trên Desktop (không ghi đè lối tắt đã có; `-NoShortcut` để bỏ). Lối tắt gọi chính script này nên vẫn đúng khi Zalo cập nhật sang thư mục phiên bản mới. `-Port N` đổi cổng.
 
-Kiểm tra tay sau khi sửa script: (a) thoát hẳn Zalo, chạy script → Zalo mở, cổng trả lời; (b) `node zmi.mjs doctor` ✓ mọi mục; (c) chạy lại script khi Zalo (MI) đang mở → báo sẵn sàng, không mở Zalo thứ hai; (d) mở Zalo bình thường rồi chạy script → hướng dẫn thoát, mã 2; (e) `-DryRun` không mở gì.
+Kiểm tra tay sau khi sửa script: (a) thoát hẳn Zalo, chạy script → Zalo mở, cổng trả lời; (b) `node zmi.mjs doctor` ✓ mọi mục; (c) chạy lại script khi Zalo (MI) đang mở → báo sẵn sàng, không mở Zalo thứ hai; (d) mở Zalo bình thường rồi chạy script → hướng dẫn thoát, mã 2; (e) `-DryRun` không mở gì; (f) Zalo mở thường, `-DryRun -Restart` → mô tả việc sẽ tắt, không tắt gì; (g) Zalo mở thường, `-Restart -NoShortcut` → Zalo khởi động lại, mã 0, `doctor` ✓; (h) chạy lại `-Restart` → báo sẵn sàng ngay, không khởi động lại.
 
-Lưu ý: khi cổng mở, mọi chương trình trên máy này đều đọc được Zalo qua `127.0.0.1:9222`. Thoát Zalo (MI) và mở Zalo bình thường khi không cần thu thập.
+Test tự động cho luồng quyết định (Pester 3.4 có sẵn trong Windows PowerShell 5.1):
+
+```
+powershell -NoProfile -Command "Invoke-Pester -Script test\zalo-mi-launch.Tests.ps1"
+```
+
+Lưu ý: khi cổng mở, mọi chương trình trên máy này đều đọc được Zalo qua `127.0.0.1:9222`. Sau khi skill khởi động lại, cổng mở tới khi tắt máy hoặc thoát Zalo; muốn đóng sớm thì thoát Zalo (khay hệ thống → Thoát) và mở lại Zalo bình thường.
 
 ## Lệnh
 

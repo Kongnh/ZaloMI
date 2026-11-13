@@ -31,7 +31,7 @@ Get, from Cong's words or by asking once (all missing items in one question):
 
 ### 2. Make sure Zalo is open in collection mode
 
-`zmi chat` needs it. If a command exits 1 with the message about opening "Zalo (MI)", run `powershell -ExecutionPolicy Bypass -File C:\Users\kongn\Pictures\CodeProject\Zalodatabase\scripts\zalo-mi-launch.ps1`. Exit 0: retry. Exit 2 (Zalo running without the debug port) or anything else: tell Cong to quit Zalo and open the "Zalo (MI)" shortcut, and wait.
+`zmi chat` needs it. If a command exits 1 with the message about opening "Zalo (MI)", tell Cong in one line "Đang khởi động lại Zalo ở chế độ thu thập (~20 giây); Zalo sẽ ở chế độ này tới khi tắt máy.", then run `powershell -ExecutionPolicy Bypass -File C:\Users\kongn\Pictures\CodeProject\Zalodatabase\scripts\zalo-mi-launch.ps1 -Restart -NoShortcut`. Cong agreed (13/11/2026) that the skill may restart a normally opened Zalo without asking; it stays in collection mode until he shuts down. Exit 0: retry. Any other exit (3 port timeout, 4 Zalo.exe not found, 5 not logged in yet, 6 Zalo would not close, 1 unexpected): tell Cong the script's message and wait.
 
 ### 3. Find the chat and get Cong's confirmation
 
