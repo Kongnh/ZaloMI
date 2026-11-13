@@ -38,9 +38,9 @@ First run `node …\zmi.mjs groups --refresh` (needs Zalo in collection mode, li
 Then run `node …\zmi.mjs sync` (in the background; it can take several minutes because it also saves new attachments and scans new screenshots at the end). Print nothing to Cong but a one-line status while it runs.
 
 - **Exit 0**: continue.
-- **Zalo not open in collection mode** (exit 1 with the message about opening "Zalo (MI)"): run `powershell -ExecutionPolicy Bypass -File C:\Users\kongn\Pictures\CodeProject\Zalodatabase\scripts\zalo-mi-launch.ps1`. It never closes a running Zalo.
-  - Exit 0: Zalo is ready; run sync again.
-  - Exit 2 (Zalo running without the debug port) or any other failure: tell Cong, and ask **once**: use the data from the last sync (give its date, from `index.md` after a quick export) or wait while he quits Zalo and opens "Zalo (MI)". Do what he picks.
+- **Zalo not open in collection mode** (any `zmi` command exits 1 with the message about opening "Zalo (MI)"): tell Cong in one line "Đang khởi động lại Zalo ở chế độ thu thập (~20 giây); Zalo sẽ ở chế độ này tới khi tắt máy.", then run `powershell -ExecutionPolicy Bypass -File C:\Users\kongn\Pictures\CodeProject\Zalodatabase\scripts\zalo-mi-launch.ps1 -Restart -NoShortcut`. Cong agreed (13/11/2026) that the skill may restart a normally opened Zalo without asking; it stays in collection mode until he shuts down, so later runs in the same session skip this.
+  - Exit 0: Zalo is ready; run the command that failed again.
+  - Any other exit (3 port timeout, 4 Zalo.exe not found, 5 not logged in yet, 6 Zalo would not close, 1 unexpected): tell Cong the script's message, and ask **once**: use the data from the last sync (give its date, from `index.md` after a quick export) or wait while he fixes it. Do what he picks.
 - Group errors at the end of sync (exit 1 with per-group errors): continue, and list the failed groups in the report's scope box.
 - If the last successful sync before today was more than 7 days ago, tell Cong that shared files and images older than ~2 weeks may be lost for good (Zalo's download links expire), and suggest syncing at least weekly.
 
